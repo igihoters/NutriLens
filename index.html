@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   
-  <!-- Tagi pełnoekranowe PWA dla Android (Chrome) oraz iOS (Safari) -->
+  <!-- Tagi pełnoekranowe PWA -->
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -12,7 +12,6 @@
   <meta name="theme-color" content="#10b981" />
   <title>NutriAI - Licznik Kalorii</title>
 
-  <!-- Powiązanie z plikiem manifest.json (dla pełnej instalacji PWA na Androidzie) -->
   <link rel="manifest" href="manifest.json" id="manifest-link" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2310b981'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='55'>🥗</text></svg>" />
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2310b981'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='55'>🥗</text></svg>" />
@@ -55,38 +54,16 @@
 <body class="bg-gray-50 text-gray-900 transition-colors duration-200">
   <div id="root"></div>
 
-  <!-- Automatyczna rejestracja Service Workera i zapasowego Manifestu PWA -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js').catch(() => {});
       });
     }
-    // Jeśli użytkownik nie dodał jeszcze pliku manifest.json, wstrzyknij manifest dynamicznie
-    fetch('manifest.json').then(r => {
-      if (!r.ok) throw new Error();
-    }).catch(() => {
-      const dynamicManifest = {
-        name: "NutriAI - Licznik Kalorii",
-        short_name: "NutriAI",
-        start_url: window.location.href,
-        display: "standalone",
-        background_color: "#18181b",
-        theme_color: "#10b981",
-        icons: [{
-          src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='42' fill='%2310b981'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='100'>🥗</text></svg>",
-          sizes: "192x192",
-          type: "image/svg+xml",
-          purpose: "any maskable"
-        }]
-      };
-      const blob = new Blob([JSON.stringify(dynamicManifest)], { type: 'application/json' });
-      document.getElementById('manifest-link').setAttribute('href', URL.createObjectURL(blob));
-    });
   </script>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     // --- LISTA MODELI Z AUTOMATYCZNYM FALLBACKIEM ---
     const FALLBACK_MODELS = [
@@ -148,6 +125,137 @@
       reader.readAsDataURL(file);
     });
 
+    // --- WBUDOWANY MODUŁ APARATU NA ŻYWO (Wymusza uprawnienia kamery) ---
+    function LiveCameraModal({ title, onCapture, onClose }) {
+      const videoRef = useRef(null);
+      const [errorMsg, setErrorMsg] = useState('');
+      const [facingMode, setFacingMode] = useState('environment'); // 'environment' (tył) lub 'user' (przód)
+      const [isReady, setIsReady] = useState(false);
+
+      useEffect(() => {
+        let currentStream = null;
+        let isMounted = true;
+
+        const startCamera = async () => {
+          setIsReady(false);
+          setErrorMsg('');
+          try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+              throw new Error("Twoja przeglądarka nie wspiera bezpośredniego dostępu do kamery.");
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: { ideal: facingMode },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+              },
+              audio: false
+            });
+            if (!isMounted) {
+              stream.getTracks().forEach(t => t.stop());
+              return;
+            }
+            currentStream = stream;
+            if (videoRef.current) {
+              videoRef.current.srcObject = stream;
+              videoRef.current.onloadedmetadata = () => {
+                videoRef.current.play().catch(() => {});
+                setIsReady(true);
+              };
+            }
+          } catch (err) {
+            setErrorMsg(
+              "Brak dostępu do aparatu (" + err.name + "). Upewnij się, że zezwoliłeś aplikacji/przeglądarce Chrome na używanie aparatu w ustawieniach systemu Android."
+            );
+          }
+        };
+
+        startCamera();
+
+        return () => {
+          isMounted = false;
+          if (currentStream) {
+            currentStream.getTracks().forEach(track => track.stop());
+          }
+        };
+      }, [facingMode]);
+
+      const takePhoto = () => {
+        if (!videoRef.current) return;
+        const video = videoRef.current;
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const base64 = dataUrl.split(',')[1];
+        onCapture({ base64, mimeType: 'image/jpeg', previewUrl: dataUrl });
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between">
+          {/* Górny pasek kamery */}
+          <div className="p-4 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent text-white z-10">
+            <span className="text-sm font-bold">{title || "Zrób zdjęcie"}</span>
+            <button onClick={onClose} className="p-2 rounded-full bg-white/10 active:scale-90">
+              <Icon name="x" className="w-6 h-6" />
+            </button>
+          </div>
+
+          {/* Podgląd wideo na żywo */}
+          <div className="relative flex-1 flex items-center justify-center overflow-hidden bg-black">
+            {errorMsg ? (
+              <div className="p-6 text-center text-white space-y-4 max-w-xs">
+                <p className="text-sm text-rose-400 font-semibold">{errorMsg}</p>
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2.5 rounded-xl bg-white/20 text-xs font-bold"
+                >
+                  Zamknij
+                </button>
+              </div>
+            ) : (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+            )}
+          </div>
+
+          {/* Dolny panel ze spustem migawki */}
+          <div className="p-6 bg-black/90 flex items-center justify-around">
+            <button
+              onClick={onClose}
+              className="text-white text-xs font-semibold opacity-80 px-3 py-2"
+            >
+              Anuluj
+            </button>
+
+            <button
+              onClick={takePhoto}
+              disabled={!isReady}
+              className={`w-20 h-20 rounded-full border-4 border-white flex items-center justify-center active:scale-90 transition-transform ${!isReady ? 'opacity-40' : ''}`}
+            >
+              <div className="w-16 h-16 rounded-full bg-emerald-500"></div>
+            </button>
+
+            <button
+              onClick={() => setFacingMode(prev => prev === 'environment' ? 'user' : 'environment')}
+              className="p-3 rounded-full bg-white/10 text-white active:scale-90"
+              title="Obróć kamerę"
+            >
+              <Icon name="refresh" className="w-6 h-6" />
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     // --- GŁÓWNY KOMPONENT ---
     function App() {
       const [theme, setTheme] = useState(() => localStorage.getItem('nutri_theme') || 'dark');
@@ -169,7 +277,6 @@
       const [activeTab, setActiveTab] = useState('dashboard');
       const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
       const [editingMeal, setEditingMeal] = useState(null);
-      const [installPromptEvent, setInstallPromptEvent] = useState(null);
 
       useEffect(() => localStorage.setItem('nutri_theme', theme), [theme]);
       useEffect(() => localStorage.setItem('nutri_profile', JSON.stringify(profile)), [profile]);
@@ -177,16 +284,6 @@
       useEffect(() => localStorage.setItem('nutri_preferred_model', preferredModel), [preferredModel]);
       useEffect(() => localStorage.setItem('nutri_daily_logs', JSON.stringify(dailyLogs)), [dailyLogs]);
       useEffect(() => localStorage.setItem('nutri_favorites', JSON.stringify(favorites)), [favorites]);
-
-      // Przechwycenie natywnego monitu instalacji PWA na Androidzie
-      useEffect(() => {
-        const handler = (e) => {
-          e.preventDefault();
-          setInstallPromptEvent(e);
-        };
-        window.addEventListener('beforeinstallprompt', handler);
-        return () => window.removeEventListener('beforeinstallprompt', handler);
-      }, []);
 
       const currentThemeObj = THEMES.find(t => t.id === theme) || THEMES[0];
 
@@ -249,22 +346,9 @@
               <span className={`w-3 h-3 rounded-full ${currentThemeObj.primary}`}></span>
               <h1 className="text-lg font-bold tracking-tight">NutriAI</h1>
             </div>
-            <div className="flex items-center space-x-2">
-              {installPromptEvent && (
-                <button
-                  onClick={() => {
-                    installPromptEvent.prompt();
-                    installPromptEvent.userChoice.then(() => setInstallPromptEvent(null));
-                  }}
-                  className="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500 text-white shadow"
-                >
-                  Zainstaluj aplikację
-                </button>
-              )}
-              <span className="text-xs font-medium px-2 py-1 rounded bg-black/5 dark:bg-white/10 opacity-70">
-                {currentThemeObj.name}
-              </span>
-            </div>
+            <span className="text-xs font-medium px-2 py-1 rounded bg-black/5 dark:bg-white/10 opacity-70">
+              {currentThemeObj.name}
+            </span>
           </header>
 
           <main className="max-w-md mx-auto px-4 pt-4">
@@ -397,7 +481,6 @@
         { label: 'Tłuszcze', val: filteredTotals.fat, target: targets.fat, unit: 'g', color: 'bg-rose-500' },
       ];
 
-      // Orientacyjne mikroskładniki wyliczane proporcjonalnie
       const microBars = [
         { label: 'Błonnik', pct: Math.min(100, Math.round((filteredTotals.carbs / 150) * 80)) },
         { label: 'Witamina C', pct: Math.min(100, Math.round((filteredTotals.calories / 2000) * 75)) },
@@ -420,7 +503,6 @@
             </button>
           </div>
 
-          {/* FILTR POSIŁKÓW */}
           <div className="flex space-x-1.5 overflow-x-auto pb-1">
             {['Wszystkie', 'Śniadanie', 'Obiad', 'Kolacja', 'Przekąska'].map(cat => (
               <button
@@ -439,7 +521,6 @@
             </div>
           )}
 
-          {/* GŁÓWNE WYKRESY SŁUPKOWE */}
           <div className={`p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-3.5`}>
             {macroBars.map((m, idx) => {
               const pct = m.target > 0 ? Math.min(100, Math.round((m.val / m.target) * 100)) : 0;
@@ -458,7 +539,6 @@
               );
             })}
 
-            {/* ROZWIJANA SEKCJA WITAMIN I MIKROSKŁADNIKÓW */}
             <div className="pt-2 border-t border-black/5 dark:border-white/5">
               <button
                 onClick={() => setShowMicros(!showMicros)}
@@ -520,7 +600,7 @@
       );
     }
 
-    // --- KREATOR DODAWANIA Z AUTOMATYCZNYM FALLBACKIEM MODELI ---
+    // --- KREATOR DODAWANIA Z WBUDOWANYM APARATEM I FALLBACKIEM MODELI ---
     function AddMealWizard({ selectedDate, apiKey, preferredModel, theme, favorites, onMealAdded, onOpenProfile }) {
       const [step, setStep] = useState(0);
       const [mealType, setMealType] = useState('Śniadanie');
@@ -533,6 +613,7 @@
       const [isLoading, setIsLoading] = useState(false);
       const [loadingStatus, setLoadingStatus] = useState('');
       const [usedModelName, setUsedModelName] = useState('');
+      const [cameraMode, setCameraMode] = useState(null); // null | 'meal' | 'label'
 
       const resetWizard = () => {
         setStep(0);
@@ -544,6 +625,7 @@
         setIsFavorite(false);
         setIsLoading(false);
         setUsedModelName('');
+        setCameraMode(null);
       };
 
       // FUNKCJA Z AUTOMATYCZNYM PRZEŁĄCZANIEM MODELI (FALLBACK)
@@ -554,7 +636,6 @@
           return null;
         }
 
-        // Ustawienie kolejności modeli (najpierw wybrany przez użytkownika, potem reszta z listy)
         const modelQueue = [
           preferredModel,
           ...FALLBACK_MODELS.filter(m => m !== preferredModel)
@@ -646,21 +727,17 @@
           } catch (err) {
             console.warn(`Błąd na modelu ${modelName}:`, err.message);
             lastError = err;
-            // Kontynuuj pętlę do następnego modelu
           }
         }
 
         throw new Error(`Wszystkie modele zawiodły. Ostatni błąd: ${lastError?.message}`);
       };
 
-      // OBSŁUGA ZDJĘCIA Z APARATU LUB GALERII
-      const handleFileSelected = async (e, mode) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
+      // WSPÓLNA FUNKCJA PRZETWARZANIA OBRAZU (Z kamery na żywo lub z galerii)
+      const analyzeCapturedImage = async ({ base64, mimeType, previewUrl }, mode) => {
+        setCameraMode(null);
         setIsLoading(true);
         try {
-          const { base64, mimeType, previewUrl } = await fileToBase64(file);
           setPreviewImg(previewUrl);
           setLastBase64(base64);
           setLastMimeType(mimeType);
@@ -673,12 +750,25 @@
               setStep(mode === 'label' ? 2 : 1);
             }
           } else {
-            alert("Wpisz swój klucz Gemini API w zakładce Profil, aby analizować prawdziwe zdjęcia.");
+            alert("Wpisz swój klucz Gemini API w zakładce Profil, aby analizować zdjęcia.");
           }
-        } catch(err) {
+        } catch (err) {
           alert("Błąd podczas analizy: " + err.message);
         } finally {
           setIsLoading(false);
+        }
+      };
+
+      // OBSŁUGA WYBORU Z GALERII
+      const handleFileSelected = async (e, mode) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          const imgData = await fileToBase64(file);
+          await analyzeCapturedImage(imgData, mode);
+        } catch(err) {
+          alert("Błąd odczytu pliku: " + err.message);
+        } finally {
           e.target.value = '';
         }
       };
@@ -750,6 +840,15 @@
 
       return (
         <div className="space-y-4">
+          {/* MODAL KAMERY NA ŻYWO */}
+          {cameraMode && (
+            <LiveCameraModal
+              title={cameraMode === 'label' ? "Zrób zdjęcie tabeli / etykiety" : "Zrób zdjęcie posiłku"}
+              onClose={() => setCameraMode(null)}
+              onCapture={(imgData) => analyzeCapturedImage(imgData, cameraMode)}
+            />
+          )}
+
           <div className="flex items-center justify-between pb-2 border-b border-black/5 dark:border-white/5">
             {step > 0 ? (
               <button onClick={() => setStep(step - 1)} className="p-2 -ml-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 active:scale-90">
@@ -771,7 +870,6 @@
             ) : <div className="w-9" />}
           </div>
 
-          {/* WYBÓR PORY POSIŁKU */}
           <div className="grid grid-cols-4 gap-1.5">
             {['Śniadanie', 'Obiad', 'Kolacja', 'Przekąska'].map(cat => (
               <button
@@ -800,25 +898,20 @@
                 </div>
               )}
 
-              {/* SEKCJA 1: POSIŁEK ZE ZDJĘCIA (Osobno Aparat i Galeria) */}
+              {/* SEKCJA 1: POSIŁEK ZE ZDJĘCIA (Aparat na żywo + Galeria) */}
               <div className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2.5`}>
                 <p className="text-xs font-bold uppercase tracking-wider opacity-60">1. Analiza talerza / posiłku</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {/* BEZPOŚREDNI APARAT (capture="environment") */}
-                  <label className="cursor-pointer p-3 rounded-xl bg-emerald-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      onChange={(e) => handleFileSelected(e, 'meal')}
-                    />
+                  <button
+                    type="button"
+                    onClick={() => setCameraMode('meal')}
+                    className="p-3 rounded-xl bg-emerald-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform"
+                  >
                     <Icon name="camera" className="w-6 h-6" />
                     <span className="text-xs font-bold">Zrób zdjęcie</span>
-                    <span className="text-[10px] opacity-80">Otwórz Aparat</span>
-                  </label>
+                    <span className="text-[10px] opacity-80">Włącz aparat</span>
+                  </button>
 
-                  {/* WCZYTAJ Z GALERII (Bez capture) */}
                   <label className={`cursor-pointer p-3 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center space-y-1.5 active:scale-95 transition-transform`}>
                     <input
                       type="file"
@@ -833,25 +926,20 @@
                 </div>
               </div>
 
-              {/* SEKCJA 2: SKANOWANIE ETYKIETY (Osobno Aparat i Galeria) */}
+              {/* SEKCJA 2: SKANOWANIE ETYKIETY (Aparat na żywo + Galeria) */}
               <div className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2.5`}>
                 <p className="text-xs font-bold uppercase tracking-wider opacity-60">2. Skanuj tabelę / etykietę (Kcal na 100g)</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {/* BEZPOŚREDNI APARAT DLA ETYKIETY */}
-                  <label className="cursor-pointer p-3 rounded-xl bg-amber-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      onChange={(e) => handleFileSelected(e, 'label')}
-                    />
+                  <button
+                    type="button"
+                    onClick={() => setCameraMode('label')}
+                    className="p-3 rounded-xl bg-amber-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform"
+                  >
                     <Icon name="barcode" className="w-6 h-6" />
                     <span className="text-xs font-bold">Skanuj aparatem</span>
-                    <span className="text-[10px] opacity-80">Zdjęcie tabeli</span>
-                  </label>
+                    <span className="text-[10px] opacity-80">Włącz aparat</span>
+                  </button>
 
-                  {/* ETYKIETA Z GALERII */}
                   <label className={`cursor-pointer p-3 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center space-y-1.5 active:scale-95 transition-transform`}>
                     <input
                       type="file"
@@ -866,7 +954,7 @@
                 </div>
               </div>
 
-              {/* SEKCJA 3: WPISZ TEKSTOWO (Również analizowane przez AI z fallbackiem) */}
+              {/* SEKCJA 3: WPISZ TEKSTOWO */}
               <button
                 onClick={async () => {
                   const text = prompt("Opisz co zjadłeś (np. 2 jajka sadzone na maśle i kromka chleba żytniego):");
@@ -898,7 +986,6 @@
                 </div>
               </button>
 
-              {/* ULUBIONE */}
               {favorites.length > 0 && (
                 <div className="pt-2 space-y-2">
                   <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Z ulubionych (szybkie dodanie)</h3>
@@ -926,7 +1013,7 @@
                 </div>
               )}
 
-              <p className="text-xs opacity-70">Sprawdź rozpoznane składniki i sposób przyrządzenia (możesz dopisać np. rodzaj mięsa lub smażenie na maśle):</p>
+              <p className="text-xs opacity-70">Sprawdź rozpoznane składniki i sposób przyrządzenia:</p>
 
               {components.map((c, i) => (
                 <div key={i} className={`p-3 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2`}>
@@ -1037,7 +1124,6 @@
                       />
                     </div>
 
-                    {/* KAFELKI JEDNOSTEK Z PRZYBLIŻONĄ WAGĄ W GRAMACH */}
                     <div className="grid grid-cols-3 gap-1.5">
                       {allowedUnits.map(unit => {
                         const approxGram = (unitWeights[unit] || 1) * (c.isHeaped && (unit === 'łyżka' || unit === 'łyżeczka') ? 1.6 : 1);
@@ -1076,7 +1162,6 @@
                       </label>
                     )}
 
-                    {/* SUWAK Z WIZUALNYMI KROPKAMI */}
                     <div className="space-y-1">
                       <input
                         type="range"
@@ -1105,7 +1190,6 @@
                 );
               })}
 
-              {/* SERDUSZKO ULUBIONYCH */}
               <div className="flex items-center justify-between px-2 pt-1">
                 <button
                   type="button"
@@ -1180,7 +1264,6 @@
               className="w-full p-2.5 rounded-xl border border-black/10 dark:border-white/10 bg-transparent text-sm font-semibold outline-none"
             />
 
-            {/* GLOBALNY SUWAK DRUGIEJ PORCJI (%) */}
             <div className="space-y-1.5 p-3 rounded-2xl bg-black/5 dark:bg-white/5">
               <div className="flex justify-between text-xs font-semibold">
                 <span>Skalowanie całej porcji:</span>
@@ -1197,7 +1280,6 @@
               />
             </div>
 
-            {/* EDYCJA POSZCZEGÓLNYCH SKŁADNIKÓW */}
             {components.map((c, idx) => (
               <div key={idx} className="p-3 rounded-xl bg-black/5 dark:bg-white/5 space-y-2">
                 <div className="flex justify-between text-xs font-bold">
@@ -1369,7 +1451,6 @@
             </div>
           </div>
 
-          {/* KLUCZ API ORAZ WYBÓR MODELU Z FALLBACKIEM */}
           <div className={`p-4 rounded-2xl border ${themeObj.border} bg-black/5 dark:bg-white/5 space-y-3`}>
             <h3 className="text-xs font-bold uppercase tracking-wider opacity-60">Klucz Gemini API i Model AI</h3>
             <input
