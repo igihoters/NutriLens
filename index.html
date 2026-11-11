@@ -16,7 +16,7 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2310b981'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='55'>🥗</text></svg>" />
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2310b981'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='55'>🥗</text></svg>" />
 
-  <!-- Wczesne przechwycenie zdarzenia instalacji PWA (zanim załaduje się React/Babel) -->
+  <!-- Wczesne przechwycenie zdarzenia instalacji PWA -->
   <script>
     window.deferredPwaPrompt = null;
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -31,7 +31,6 @@
       });
     }
 
-    // Zapasowy manifest, jeśli plik manifest.json jeszcze się nie załadował
     fetch('manifest.json').then(r => {
       if (!r.ok) throw new Error();
     }).catch(() => {
@@ -96,6 +95,15 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef, useCallback, memo } = React;
 
+    // --- FUNKCJA ZATWIERDZANIA POLA I ZAMYKANIA KLAWIATURY TELEFONU PRZY ENTER / GOTOWE ---
+    const blurOnEnter = (e) => {
+      if (e.key === 'Enter' || e.keyCode === 13) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.blur();
+      }
+    };
+
     // --- LISTA MODELI Z AUTOMATYCZNYM FALLBACKIEM ---
     const FALLBACK_MODELS = [
       'gemini-3.8-flash',
@@ -104,6 +112,13 @@
       'gemini-2.5-flash-lite',
       'argon',
       'gemini-2.5-flash'
+    ];
+
+    // --- OPCJE ROZMIARU CZCIONKI ---
+    const FONT_SIZES = [
+      { id: 'normal', name: 'Standardowa', scale: '100%' },
+      { id: 'large', name: 'Duża', scale: '112.5%' },
+      { id: 'xlarge', name: 'Bardzo duża', scale: '125%' }
     ];
 
     // --- STATYCZNA MAPA IKON SVG ---
@@ -177,6 +192,77 @@
       };
       img.src = objectUrl;
     });
+
+    // --- MODAL NOTATNIKA DO WPISYWANIA TEKSTOWEGO (Tutaj Enter robi nową linię) ---
+    function TextMealModal({ theme, onClose, onSubmit }) {
+      const [text, setText] = useState('');
+      const textareaRef = useRef(null);
+
+      useEffect(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+        }
+      }, []);
+
+      const handleConfirm = () => {
+        const trimmed = text.trim();
+        if (!trimmed) {
+          alert("Wpisz najpierw co zjadłeś.");
+          return;
+        }
+        onSubmit(trimmed);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-3xl p-5 border ${theme.border} ${theme.bg} ${theme.text} space-y-4 shadow-2xl`}>
+            <div className="flex justify-between items-center border-b border-black/10 dark:border-white/10 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 rounded-xl bg-blue-500 text-white">
+                  <Icon name="type" className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold">Notatnik posiłku</h3>
+              </div>
+              <button onClick={onClose} className="p-1.5 rounded-xl opacity-60 hover:opacity-100">
+                <Icon name="x" className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs opacity-75 leading-relaxed">
+              Opisz swobodnie w kilku linijkach co zjadłeś i jak było przygotowane. Tekst automatycznie zawija się do nowej linii:
+            </p>
+
+            <div className={`rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 p-3`}>
+              <textarea
+                ref={textareaRef}
+                rows={6}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={"Np.:\n- 2 jajka sadzone usmażone na łyżeczce masła\n- 2 kromki chleba żytniego\n- pół pomidora i kubek kawy z mlekiem 2%"}
+                className="w-full bg-transparent text-sm leading-relaxed outline-none resize-y min-h-[130px]"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={onClose}
+                className={`py-3 rounded-2xl border ${theme.border} text-xs font-bold opacity-80 active:scale-98`}
+              >
+                Anuluj
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                className="py-3 rounded-2xl bg-emerald-500 text-white text-xs font-bold shadow-md active:scale-98"
+              >
+                Analizuj posiłek
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     // --- WBUDOWANY MODUŁ APARATU NA ŻYWO ---
     function LiveCameraModal({ title, onCapture, onClose }) {
@@ -322,6 +408,7 @@
     // --- GŁÓWNY KOMPONENT ---
     function App() {
       const [theme, setTheme] = useState(() => localStorage.getItem('nutri_theme') || 'dark');
+      const [fontSize, setFontSize] = useState(() => localStorage.getItem('nutri_font_size') || 'large');
       const [profile, setProfile] = useState(() => {
         try { return JSON.parse(localStorage.getItem('nutri_profile')) || DEFAULT_PROFILE; }
         catch(e) { return DEFAULT_PROFILE; }
@@ -341,7 +428,7 @@
       const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
       const [editingMeal, setEditingMeal] = useState(null);
 
-      // Stan instalacji PWA (pobiera również zdarzenie przechwycone przed startem Reacta)
+      // Stan instalacji PWA
       const [installPromptEvent, setInstallPromptEvent] = useState(() => window.deferredPwaPrompt || null);
       const [isStandalone, setIsStandalone] = useState(() =>
         window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true
@@ -378,6 +465,13 @@
           setInstallPromptEvent(null);
         });
       }, [installPromptEvent]);
+
+      // Skalowanie wielkości czcionki na poziomie głównego elementu HTML
+      useEffect(() => {
+        const sizeObj = FONT_SIZES.find(f => f.id === fontSize) || FONT_SIZES[1];
+        document.documentElement.style.fontSize = sizeObj.scale;
+        localStorage.setItem('nutri_font_size', fontSize);
+      }, [fontSize]);
 
       // Zapis do localStorage
       useEffect(() => localStorage.setItem('nutri_theme', theme), [theme]);
@@ -453,20 +547,20 @@
         <div className={`min-h-screen ${currentThemeObj.bg} ${currentThemeObj.text} pb-24 font-sans antialiased transition-colors duration-200`}>
           <header className={`sticky top-0 z-30 px-5 py-3.5 border-b ${currentThemeObj.border} ${currentThemeObj.bg}/90 backdrop-blur-md flex items-center justify-between`}>
             <div className="flex items-center space-x-2">
-              <span className={`w-3 h-3 rounded-full ${currentThemeObj.primary}`}></span>
+              <span className={`w-3.5 h-3.5 rounded-full ${currentThemeObj.primary}`}></span>
               <h1 className="text-lg font-bold tracking-tight">NutriAI</h1>
             </div>
             <div className="flex items-center space-x-2">
               {installPromptEvent && (
                 <button
                   onClick={handleTriggerInstall}
-                  className="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500 text-white shadow flex items-center space-x-1 active:scale-95 transition-transform"
+                  className="text-xs font-bold px-3 py-1.5 rounded-xl bg-emerald-500 text-white shadow flex items-center space-x-1 active:scale-95 transition-transform"
                 >
-                  <Icon name="download" className="w-3.5 h-3.5" />
-                  <span>Zainstaluj aplikację</span>
+                  <Icon name="download" className="w-4 h-4" />
+                  <span>Zainstaluj</span>
                 </button>
               )}
-              <span className="text-xs font-medium px-2 py-1 rounded bg-black/5 dark:bg-white/10 opacity-70">
+              <span className="text-xs font-medium px-2.5 py-1 rounded-lg bg-black/5 dark:bg-white/10 opacity-75">
                 {currentThemeObj.name}
               </span>
             </div>
@@ -517,6 +611,8 @@
                 setPreferredModel={setPreferredModel}
                 theme={theme}
                 setTheme={setTheme}
+                fontSize={fontSize}
+                setFontSize={setFontSize}
                 themeObj={currentThemeObj}
                 dailyLogs={dailyLogs}
                 installPromptEvent={installPromptEvent}
@@ -619,7 +715,7 @@
             </button>
             <div className="text-center">
               <p className="text-xs opacity-60 font-medium uppercase tracking-wider">{isToday ? "Dzisiaj" : "Data"}</p>
-              <p className="text-sm font-bold">{selectedDate}</p>
+              <p className="text-base font-bold">{selectedDate}</p>
             </div>
             <button onClick={() => changeDay(1)} className="p-2 rounded-xl hover:bg-black/10 dark:hover:bg-white/10 active:scale-90">
               <Icon name="chevronRight" className="w-5 h-5" />
@@ -631,7 +727,7 @@
               <button
                 key={cat}
                 onClick={() => setMealFilter(cat)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${mealFilter === cat ? 'bg-emerald-500 text-white shadow-sm' : 'bg-black/5 dark:bg-white/5 opacity-70'}`}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${mealFilter === cat ? 'bg-emerald-500 text-white shadow-sm' : 'bg-black/5 dark:bg-white/5 opacity-75'}`}
               >
                 {cat}
               </button>
@@ -639,23 +735,23 @@
           </div>
 
           {isDaySkipped && (
-            <div className="p-2.5 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-center text-xs font-medium">
+            <div className="p-3 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-center text-xs font-medium">
               Dzień ominięty (brak wpisów – nie zaniża średniej)
             </div>
           )}
 
-          <div className={`p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-3.5`}>
+          <div className={`p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-4`}>
             {macroBars.map((m, idx) => {
               const pct = m.target > 0 ? Math.min(100, Math.round((m.val / m.target) * 100)) : 0;
               return (
-                <div key={idx} className="space-y-1">
-                  <div className="flex justify-between items-center text-xs">
+                <div key={idx} className="space-y-1.5">
+                  <div className="flex justify-between items-center text-sm">
                     <span className="font-semibold">{m.label}</span>
-                    <span className="opacity-80">
+                    <span className="opacity-85">
                       <strong>{m.val}</strong> / {m.target} {m.unit} ({pct}%)
                     </span>
                   </div>
-                  <div className="w-full h-3 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden relative">
+                  <div className="w-full h-3.5 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden relative">
                     <div className={`h-full ${m.color} transition-all duration-500 rounded-full`} style={{ width: `${pct}%` }} />
                   </div>
                 </div>
@@ -665,7 +761,7 @@
             <div className="pt-2 border-t border-black/5 dark:border-white/5">
               <button
                 onClick={() => setShowMicros(!showMicros)}
-                className="w-full flex items-center justify-between text-xs font-semibold opacity-75 hover:opacity-100 py-1"
+                className="w-full flex items-center justify-between text-xs font-semibold opacity-80 hover:opacity-100 py-1.5"
               >
                 <span>Witaminy i pozostałe składniki (orientacyjnie)</span>
                 <Icon name="chevronDown" className={`w-4 h-4 transition-transform ${showMicros ? 'rotate-180' : ''}`} />
@@ -674,11 +770,11 @@
                 <div className="space-y-2.5 pt-3">
                   {microBars.map((micro, idx) => (
                     <div key={idx} className="space-y-1">
-                      <div className="flex justify-between text-[11px] opacity-80">
+                      <div className="flex justify-between text-xs opacity-85">
                         <span>{micro.label}</span>
                         <span>~{micro.pct}% dziennego celu</span>
                       </div>
-                      <div className="w-full h-2 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
+                      <div className="w-full h-2.5 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
                         <div className="h-full bg-teal-500 rounded-full transition-all duration-500" style={{ width: `${micro.pct}%` }} />
                       </div>
                     </div>
@@ -689,30 +785,30 @@
           </div>
 
           <div className="space-y-2.5 pt-2">
-            <h2 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Zjedzone posiłki ({filteredMeals.length})</h2>
+            <h2 className="text-xs font-bold uppercase tracking-wider opacity-65 px-1">Zjedzone posiłki ({filteredMeals.length})</h2>
             {filteredMeals.length === 0 ? (
               <p className="text-center py-8 text-sm opacity-50 italic">Brak posiłków w tym widoku.</p>
             ) : (
               filteredMeals.map((meal) => (
-                <div key={meal.id} className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 flex items-center justify-between`}>
-                  <div className="space-y-0.5 pr-2">
+                <div key={meal.id} className={`p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 flex items-center justify-between`}>
+                  <div className="space-y-1 pr-2">
                     <div className="flex items-center space-x-2">
-                      <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-500">
+                      <span className="text-xs font-bold uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-500">
                         {meal.mealType || 'Posiłek'}
                       </span>
-                      <h3 className="text-sm font-bold">{meal.name}</h3>
+                      <h3 className="text-base font-bold">{meal.name}</h3>
                     </div>
-                    <p className="text-xs opacity-60">{meal.components?.map(c => c.name).join(', ') || 'Posiłek'}</p>
-                    <p className="text-xs font-medium text-emerald-500">
+                    <p className="text-xs opacity-65">{meal.components?.map(c => c.name).join(', ') || 'Posiłek'}</p>
+                    <p className="text-xs font-semibold text-emerald-500">
                       {meal.totalCalories} kcal &bull; B: {meal.totalProtein}g &bull; W: {meal.totalCarbs}g &bull; T: {meal.totalFat}g
                     </p>
                   </div>
                   <div className="flex items-center space-x-1 shrink-0">
-                    <button onClick={() => onEditMeal(meal)} className="p-2 rounded-xl text-blue-500 hover:bg-black/5">
-                      <Icon name="pencil" className="w-4 h-4" />
+                    <button onClick={() => onEditMeal(meal)} className="p-2.5 rounded-xl text-blue-500 hover:bg-black/5">
+                      <Icon name="pencil" className="w-5 h-5" />
                     </button>
-                    <button onClick={() => onDeleteMeal(meal.id)} className="p-2 rounded-xl text-rose-500 hover:bg-black/5">
-                      <Icon name="trash" className="w-4 h-4" />
+                    <button onClick={() => onDeleteMeal(meal.id)} className="p-2.5 rounded-xl text-rose-500 hover:bg-black/5">
+                      <Icon name="trash" className="w-5 h-5" />
                     </button>
                   </div>
                 </div>
@@ -735,6 +831,7 @@
       const [loadingStatus, setLoadingStatus] = useState('');
       const [usedModelName, setUsedModelName] = useState('');
       const [cameraMode, setCameraMode] = useState(null);
+      const [isTextModalOpen, setIsTextModalOpen] = useState(false);
       const abortControllerRef = useRef(null);
 
       const resetWizard = useCallback(() => {
@@ -751,6 +848,7 @@
         setLoadingStatus('');
         setUsedModelName('');
         setCameraMode(null);
+        setIsTextModalOpen(false);
       }, []);
 
       const callGeminiWithFallback = async ({ dataUrl, textPrompt, mode }) => {
@@ -903,6 +1001,30 @@
         }
       };
 
+      const handleTextMealSubmit = async (textDescription) => {
+        setIsTextModalOpen(false);
+        if (!apiKey) {
+          alert("Wklej klucz Gemini API w zakładce Profil.");
+          onOpenProfile();
+          return;
+        }
+        setIsLoading(true);
+        try {
+          const result = await callGeminiWithFallback({ textPrompt: textDescription, mode: 'meal' });
+          if (result) {
+            setMealName(result.dishName || textDescription.split('\n')[0].slice(0, 40));
+            setComponents(result.components || []);
+            setStep(1);
+          }
+        } catch (err) {
+          if (err.message !== "Przerwano zapytanie") {
+            alert("Błąd analizy tekstu: " + err.message);
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
       const handleFileSelected = async (e, mode) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -955,7 +1077,8 @@
       const totals = useMemo(() => {
         return components.reduce((acc, c) => {
           const unitWeights = c.unitWeights || { 'g': 1, 'sztuka': 100 };
-          let weightInGrams = (unitWeights[c.selectedUnit] || 1) * c.amount;
+          const numericAmount = parseFloat(c.amount) || 0;
+          let weightInGrams = (unitWeights[c.selectedUnit] || 1) * numericAmount;
           if (c.isHeaped && (c.selectedUnit === 'łyżka' || c.selectedUnit === 'łyżeczka')) {
             weightInGrams *= 1.6;
           }
@@ -969,11 +1092,15 @@
       }, [components]);
 
       const handleSave = () => {
+        const normalizedComponents = components.map(c => ({
+          ...c,
+          amount: parseFloat(c.amount) || 0
+        }));
         const newMeal = {
           id: 'meal-' + Date.now(),
           mealType,
           name: mealName || 'Posiłek',
-          components,
+          components: normalizedComponents,
           totalCalories: totals.calories,
           totalProtein: totals.protein,
           totalCarbs: totals.carbs,
@@ -994,6 +1121,14 @@
             />
           )}
 
+          {isTextModalOpen && (
+            <TextMealModal
+              theme={theme}
+              onClose={() => setIsTextModalOpen(false)}
+              onSubmit={handleTextMealSubmit}
+            />
+          )}
+
           <div className="flex items-center justify-between pb-2 border-b border-black/5 dark:border-white/5">
             {step > 0 ? (
               <button onClick={() => setStep(step - 1)} className="p-2 -ml-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 active:scale-90">
@@ -1001,13 +1136,13 @@
               </button>
             ) : <div className="w-9" />}
             <div className="text-center">
-              <h2 className="text-sm font-bold">
+              <h2 className="text-base font-bold">
                 {step === 0 && "Dodaj posiłek"}
                 {step === 1 && "Krok 1: Co rozpoznano?"}
                 {step === 2 && "Krok 2: Ustal porcje"}
               </h2>
               {usedModelName && step > 0 && (
-                <p className="text-[10px] text-emerald-500 font-medium">Model: {usedModelName}</p>
+                <p className="text-xs text-emerald-500 font-medium">Model: {usedModelName}</p>
               )}
             </div>
             {(step > 0 || isLoading) ? (
@@ -1020,7 +1155,7 @@
               <button
                 key={cat}
                 onClick={() => setMealType(cat)}
-                className={`py-2 rounded-xl text-xs font-semibold transition-all ${mealType === cat ? 'bg-emerald-500 text-white shadow-sm' : 'bg-black/5 dark:bg-white/5 opacity-70'}`}
+                className={`py-2.5 rounded-xl text-xs font-semibold transition-all ${mealType === cat ? 'bg-emerald-500 text-white shadow-sm' : 'bg-black/5 dark:bg-white/5 opacity-75'}`}
               >
                 {cat}
               </button>
@@ -1030,34 +1165,34 @@
           {isLoading && (
             <div className="text-center py-16 space-y-3">
               <div className="inline-block w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-xs font-medium opacity-80 px-4">{loadingStatus}</p>
+              <p className="text-sm font-medium opacity-80 px-4">{loadingStatus}</p>
             </div>
           )}
 
           {!isLoading && step === 0 && (
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               {!apiKey && (
-                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs flex justify-between items-center">
+                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs flex justify-between items-center">
                   <span>Wklej klucz Gemini API w Profilu, aby uruchomić analizę AI.</span>
                   <button onClick={onOpenProfile} className="underline font-bold ml-2">Profil</button>
                 </div>
               )}
 
               {/* SEKCJA 1: POSIŁEK ZE ZDJĘCIA */}
-              <div className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2.5`}>
-                <p className="text-xs font-bold uppercase tracking-wider opacity-60">1. Analiza talerza / posiłku</p>
-                <div className="grid grid-cols-2 gap-2">
+              <div className={`p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2.5`}>
+                <p className="text-xs font-bold uppercase tracking-wider opacity-65">1. Analiza talerza / posiłku</p>
+                <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setCameraMode('meal')}
-                    className="p-3 rounded-xl bg-emerald-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform"
+                    className="p-3.5 rounded-xl bg-emerald-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform"
                   >
                     <Icon name="camera" className="w-6 h-6" />
-                    <span className="text-xs font-bold">Zrób zdjęcie</span>
-                    <span className="text-[10px] opacity-80">Włącz aparat</span>
+                    <span className="text-sm font-bold">Zrób zdjęcie</span>
+                    <span className="text-xs opacity-85">Włącz aparat</span>
                   </button>
 
-                  <label className={`cursor-pointer p-3 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center space-y-1.5 active:scale-95 transition-transform`}>
+                  <label className={`cursor-pointer p-3.5 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center space-y-1.5 active:scale-95 transition-transform`}>
                     <input
                       type="file"
                       accept="image/*"
@@ -1065,27 +1200,27 @@
                       onChange={(e) => handleFileSelected(e, 'meal')}
                     />
                     <Icon name="image" className="w-6 h-6 text-emerald-500" />
-                    <span className="text-xs font-bold">Z galerii</span>
-                    <span className="text-[10px] opacity-60">Wybierz plik</span>
+                    <span className="text-sm font-bold">Z galerii</span>
+                    <span className="text-xs opacity-65">Wybierz plik</span>
                   </label>
                 </div>
               </div>
 
               {/* SEKCJA 2: SKANOWANIE ETYKIETY */}
-              <div className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2.5`}>
-                <p className="text-xs font-bold uppercase tracking-wider opacity-60">2. Skanuj tabelę / etykietę (Kcal na 100g)</p>
-                <div className="grid grid-cols-2 gap-2">
+              <div className={`p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2.5`}>
+                <p className="text-xs font-bold uppercase tracking-wider opacity-65">2. Skanuj tabelę / etykietę (Kcal na 100g)</p>
+                <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setCameraMode('label')}
-                    className="p-3 rounded-xl bg-amber-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform"
+                    className="p-3.5 rounded-xl bg-amber-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform"
                   >
                     <Icon name="barcode" className="w-6 h-6" />
-                    <span className="text-xs font-bold">Skanuj aparatem</span>
-                    <span className="text-[10px] opacity-80">Włącz aparat</span>
+                    <span className="text-sm font-bold">Skanuj aparatem</span>
+                    <span className="text-xs opacity-85">Włącz aparat</span>
                   </button>
 
-                  <label className={`cursor-pointer p-3 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center space-y-1.5 active:scale-95 transition-transform`}>
+                  <label className={`cursor-pointer p-3.5 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center space-y-1.5 active:scale-95 transition-transform`}>
                     <input
                       type="file"
                       accept="image/*"
@@ -1093,58 +1228,37 @@
                       onChange={(e) => handleFileSelected(e, 'label')}
                     />
                     <Icon name="image" className="w-6 h-6 text-amber-500" />
-                    <span className="text-xs font-bold">Etykieta z galerii</span>
-                    <span className="text-[10px] opacity-60">Wybierz plik</span>
+                    <span className="text-sm font-bold">Etykieta z galerii</span>
+                    <span className="text-xs opacity-65">Wybierz plik</span>
                   </label>
                 </div>
               </div>
 
               {/* SEKCJA 3: WPISZ TEKSTOWO */}
               <button
-                onClick={async () => {
-                  const text = prompt("Opisz co zjadłeś (np. 2 jajka sadzone na maśle i kromka chleba żytniego):");
-                  if (!text) return;
-                  if (!apiKey) {
-                    alert("Wklej klucz Gemini API w zakładce Profil.");
-                    return;
-                  }
-                  setIsLoading(true);
-                  try {
-                    const result = await callGeminiWithFallback({ textPrompt: text, mode: 'meal' });
-                    if (result) {
-                      setMealName(result.dishName || text);
-                      setComponents(result.components || []);
-                      setStep(1);
-                    }
-                  } catch (err) {
-                    if (err.message !== "Przerwano zapytanie") {
-                      alert("Błąd analizy tekstu: " + err.message);
-                    }
-                  } finally {
-                    setIsLoading(false);
-                  }
-                }}
-                className={`w-full p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 flex items-center space-x-3 active:scale-98 transition-transform`}
+                type="button"
+                onClick={() => setIsTextModalOpen(true)}
+                className={`w-full p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 flex items-center space-x-3.5 active:scale-98 transition-transform`}
               >
-                <div className="p-3 rounded-xl bg-blue-500 text-white"><Icon name="type" /></div>
+                <div className="p-3 rounded-xl bg-blue-500 text-white shrink-0"><Icon name="type" /></div>
                 <div className="text-left">
-                  <p className="text-sm font-bold">Wpisz tekstowo (AI)</p>
-                  <p className="text-xs opacity-60">Opisz posiłek słowami, gdy nie masz zdjęcia</p>
+                  <p className="text-sm font-bold">Wpisz tekstowo w notatniku (AI)</p>
+                  <p className="text-xs opacity-65">Wygodne wielolinijkowe okienko do opisu posiłku</p>
                 </div>
               </button>
 
-              {/* ULUBIONE Z CZERWONYM PRZYCISKIEM X I POTWIERDZENIEM */}
+              {/* ULUBIONE */}
               {favorites.length > 0 && (
                 <div className="pt-2 space-y-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Z ulubionych ({favorites.length})</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-wider opacity-65 px-1">Z ulubionych ({favorites.length})</h3>
                   {favorites.map(fav => (
                     <div
                       key={fav.id}
                       onClick={() => handleSelectFavorite(fav)}
-                      className={`w-full p-3 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 text-left text-xs font-semibold flex justify-between items-center cursor-pointer active:scale-98 transition-transform`}
+                      className={`w-full p-3.5 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 text-left text-sm font-semibold flex justify-between items-center cursor-pointer active:scale-98 transition-transform`}
                     >
                       <span className="truncate pr-2">{fav.name}</span>
-                      <div className="flex items-center space-x-1 shrink-0">
+                      <div className="flex items-center space-x-1.5 shrink-0">
                         <button
                           type="button"
                           onClick={(e) => onDeleteFavorite(fav.id, fav.name, e)}
@@ -1162,22 +1276,24 @@
             </div>
           )}
 
-          {/* KROK 1: WERYFIKACJA SKŁADNIKÓW */}
+          {/* KROK 1: WERYFIKACJA SKŁADNIKÓW (Z obsługą Enter -> zamknij klawiaturę) */}
           {!isLoading && step === 1 && (
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               {previewImg && (
                 <div className="w-full h-36 rounded-2xl overflow-hidden border border-black/10 dark:border-white/10">
                   <img src={previewImg} alt="Podgląd" className="w-full h-full object-cover" />
                 </div>
               )}
 
-              <p className="text-xs opacity-70">Sprawdź rozpoznane składniki i sposób przyrządzenia:</p>
+              <p className="text-xs opacity-75">Sprawdź rozpoznane składniki i sposób przyrządzenia:</p>
 
               {components.map((c, i) => (
-                <div key={i} className={`p-3 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2`}>
+                <div key={i} className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2.5`}>
                   <div className="flex items-center justify-between">
                     <input
                       type="text"
+                      enterKeyHint="done"
+                      onKeyDown={blurOnEnter}
                       value={c.name}
                       onChange={(e) => {
                         const next = [...components];
@@ -1187,11 +1303,13 @@
                       className="bg-transparent font-bold text-sm w-full outline-none"
                     />
                     <button onClick={() => setComponents(components.filter((_, idx) => idx !== i))} className="text-rose-500 p-1">
-                      <Icon name="x" className="w-4 h-4" />
+                      <Icon name="x" className="w-5 h-5" />
                     </button>
                   </div>
                   <input
                     type="text"
+                    enterKeyHint="done"
+                    onKeyDown={blurOnEnter}
                     placeholder="Sposób przygotowania (np. wieprzowina, smażone na łyżce oleju)"
                     value={c.prepMethod || ''}
                     onChange={(e) => {
@@ -1199,7 +1317,7 @@
                       next[i].prepMethod = e.target.value;
                       setComponents(next);
                     }}
-                    className="w-full text-xs p-2 rounded-lg bg-black/5 dark:bg-white/10 outline-none"
+                    className="w-full text-xs p-2.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none"
                   />
                 </div>
               ))}
@@ -1220,22 +1338,22 @@
                     fatPer100g: 4
                   }]);
                 }}
-                className="w-full py-2.5 rounded-xl border border-dashed border-emerald-500/50 text-emerald-500 text-xs font-bold"
+                className="w-full py-3 rounded-xl border border-dashed border-emerald-500/50 text-emerald-500 text-xs font-bold"
               >
                 + Dodaj brakujący składnik
               </button>
 
-              <div className="grid grid-cols-2 gap-2 pt-1">
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
                 <button
                   onClick={handleRecalculateStep1}
-                  className="py-3 px-2 rounded-2xl border border-emerald-500 text-emerald-500 font-bold text-xs flex items-center justify-center space-x-1 active:scale-95"
+                  className="py-3.5 px-2 rounded-2xl border border-emerald-500 text-emerald-500 font-bold text-xs flex items-center justify-center space-x-1.5 active:scale-95"
                 >
                   <Icon name="refresh" className="w-4 h-4" />
                   <span>Przelicz zmiany z AI</span>
                 </button>
                 <button
                   onClick={() => setStep(2)}
-                  className="py-3 px-2 rounded-2xl bg-emerald-500 text-white font-bold text-xs shadow-md active:scale-95"
+                  className="py-3.5 px-2 rounded-2xl bg-emerald-500 text-white font-bold text-xs shadow-md active:scale-95"
                 >
                   Dalej: Ustal ilości
                 </button>
@@ -1243,12 +1361,12 @@
             </div>
           )}
 
-          {/* KROK 2: USTALANIE PORCJI */}
+          {/* KROK 2: USTALANIE PORCJI (Z obsługą Enter -> zatwierdź i zamknij klawiaturę) */}
           {!isLoading && step === 2 && (
             <div className="space-y-4">
-              <div className={`p-3.5 rounded-2xl border ${theme.border} bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-center`}>
-                <p className="text-xl font-black">{totals.calories} kcal</p>
-                <p className="text-xs font-semibold mt-0.5">
+              <div className={`p-4 rounded-2xl border ${theme.border} bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-center`}>
+                <p className="text-2xl font-black">{totals.calories} kcal</p>
+                <p className="text-xs font-semibold mt-1">
                   Białko: {totals.protein}g &bull; Węgle: {totals.carbs}g &bull; Tłuszcze: {totals.fat}g
                 </p>
               </div>
@@ -1258,24 +1376,34 @@
                 const unitWeights = c.unitWeights || { 'sztuka': 100, 'garść': 50, 'g': 1 };
                 const maxVal = c.selectedUnit === 'g' ? 500 : 5;
                 const stepVal = c.selectedUnit === 'g' ? 10 : 0.5;
+                const numericAmount = parseFloat(c.amount);
+                const safeSliderVal = isNaN(numericAmount) ? 0 : Math.min(maxVal, numericAmount);
 
                 return (
-                  <div key={i} className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-3`}>
-                    <div className="flex justify-between items-center">
+                  <div key={i} className={`p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-3`}>
+                    <div className="flex justify-between items-center gap-2">
                       <div>
-                        <span className="text-sm font-bold block">{c.name}</span>
-                        {c.prepMethod && <span className="text-[10px] opacity-60">{c.prepMethod}</span>}
+                        <span className="text-base font-bold block">{c.name}</span>
+                        {c.prepMethod && <span className="text-xs opacity-65">{c.prepMethod}</span>}
                       </div>
                       <input
                         type="number"
+                        enterKeyHint="done"
+                        onKeyDown={blurOnEnter}
                         step={stepVal}
                         value={c.amount}
                         onChange={(e) => {
                           const next = [...components];
-                          next[i].amount = parseFloat(e.target.value) || 0;
+                          next[i].amount = e.target.value;
                           setComponents(next);
                         }}
-                        className="w-20 p-1.5 text-right rounded-lg bg-black/10 dark:bg-white/10 text-xs font-bold outline-none"
+                        onBlur={() => {
+                          const next = [...components];
+                          const parsed = parseFloat(next[i].amount);
+                          next[i].amount = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+                          setComponents(next);
+                        }}
+                        className="w-24 p-2 text-right rounded-xl bg-black/10 dark:bg-white/10 text-sm font-bold outline-none"
                       />
                     </div>
 
@@ -1292,10 +1420,10 @@
                               next[i].amount = unit === 'g' ? 100 : 1;
                               setComponents(next);
                             }}
-                            className={`py-1.5 px-2 rounded-xl text-xs flex flex-col items-center justify-center border ${isSel ? 'border-emerald-500 bg-emerald-500/10 font-bold text-emerald-500' : 'border-black/5 dark:border-white/5 opacity-70'}`}
+                            className={`py-2 px-2 rounded-xl text-xs flex flex-col items-center justify-center border ${isSel ? 'border-emerald-500 bg-emerald-500/10 font-bold text-emerald-500' : 'border-black/5 dark:border-white/5 opacity-75'}`}
                           >
                             <span>{unit}</span>
-                            {unit !== 'g' && <span className="text-[10px] opacity-60">1 = ~{Math.round(approxGram)}g</span>}
+                            {unit !== 'g' && <span className="text-xs opacity-65">1 = ~{Math.round(approxGram)}g</span>}
                           </button>
                         );
                       })}
@@ -1311,7 +1439,7 @@
                             next[i].isHeaped = e.target.checked;
                             setComponents(next);
                           }}
-                          className="rounded text-emerald-500"
+                          className="rounded text-emerald-500 w-4 h-4"
                         />
                         <span>Czubata łyżka (+60% wagi)</span>
                       </label>
@@ -1320,10 +1448,10 @@
                     <div className="space-y-1">
                       <input
                         type="range"
-                        min={c.selectedUnit === 'g' ? 10 : 0.5}
+                        min={0}
                         max={maxVal}
                         step={stepVal}
-                        value={Math.min(maxVal, c.amount)}
+                        value={safeSliderVal}
                         onChange={(e) => {
                           const next = [...components];
                           next[i].amount = parseFloat(e.target.value);
@@ -1331,8 +1459,8 @@
                         }}
                         className="w-full accent-emerald-500 cursor-pointer"
                       />
-                      <div className="flex justify-between text-[10px] opacity-40 px-1">
-                        <span>{c.selectedUnit === 'g' ? '10g' : '0.5'}</span>
+                      <div className="flex justify-between text-xs opacity-50 px-1">
+                        <span>0</span>
                         <span>{c.selectedUnit === 'g' ? '250g' : '2.5'}</span>
                         <span>{c.selectedUnit === 'g' ? '500g' : '5'}</span>
                       </div>
@@ -1345,7 +1473,7 @@
                 <button
                   type="button"
                   onClick={() => setIsFavorite(!isFavorite)}
-                  className="flex items-center space-x-2 text-xs font-semibold"
+                  className="flex items-center space-x-2 text-sm font-semibold"
                 >
                   <Icon
                     name="heart"
@@ -1368,7 +1496,7 @@
       );
     }
 
-    // --- MODAL EDYCJI WPISANEGO POSIŁKU ---
+    // --- MODAL EDYCJI WPISANEGO POSIŁKU (Z obsługą Enter -> zamknij klawiaturę) ---
     function EditMealModal({ meal, theme, onClose, onSave }) {
       const [mealName, setMealName] = useState(meal.name);
       const [portionMultiplier, setPortionMultiplier] = useState(100);
@@ -1387,7 +1515,8 @@
         }
         return components.reduce((acc, c) => {
           const unitWeights = c.unitWeights || { 'g': 1, 'sztuka': 100 };
-          let weightInGrams = (unitWeights[c.selectedUnit] || 1) * c.amount * mult;
+          const numericAmount = parseFloat(c.amount) || 0;
+          let weightInGrams = (unitWeights[c.selectedUnit] || 1) * numericAmount * mult;
           if (c.isHeaped && (c.selectedUnit === 'łyżka' || c.selectedUnit === 'łyżeczka')) {
             weightInGrams *= 1.6;
           }
@@ -1410,12 +1539,14 @@
 
             <input
               type="text"
+              enterKeyHint="done"
+              onKeyDown={blurOnEnter}
               value={mealName}
               onChange={(e) => setMealName(e.target.value)}
               className="w-full p-2.5 rounded-xl border border-black/10 dark:border-white/10 bg-transparent text-sm font-semibold outline-none"
             />
 
-            <div className="space-y-1.5 p-3 rounded-2xl bg-black/5 dark:bg-white/5">
+            <div className="space-y-1.5 p-3.5 rounded-2xl bg-black/5 dark:bg-white/5">
               <div className="flex justify-between text-xs font-semibold">
                 <span>Skalowanie całej porcji:</span>
                 <span className="text-emerald-500 font-bold">{portionMultiplier}%</span>
@@ -1431,29 +1562,54 @@
               />
             </div>
 
-            {components.map((c, idx) => (
-              <div key={idx} className="p-3 rounded-xl bg-black/5 dark:bg-white/5 space-y-2">
-                <div className="flex justify-between text-xs font-bold">
-                  <span>{c.name}</span>
-                  <span>{c.amount} {c.selectedUnit}</span>
-                </div>
-                <input
-                  type="range"
-                  min={c.selectedUnit === 'g' ? 10 : 0.5}
-                  max={c.selectedUnit === 'g' ? 500 : 5}
-                  step={c.selectedUnit === 'g' ? 10 : 0.5}
-                  value={c.amount}
-                  onChange={(e) => {
-                    const next = [...components];
-                    next[idx].amount = parseFloat(e.target.value);
-                    setComponents(next);
-                  }}
-                  className="w-full accent-emerald-500"
-                />
-              </div>
-            ))}
+            {components.map((c, idx) => {
+              const maxVal = c.selectedUnit === 'g' ? 500 : 5;
+              const stepVal = c.selectedUnit === 'g' ? 10 : 0.5;
+              const numericAmount = parseFloat(c.amount);
+              const safeSliderVal = isNaN(numericAmount) ? 0 : Math.min(maxVal, numericAmount);
 
-            <div className="text-center text-xs opacity-80">
+              return (
+                <div key={idx} className="p-3.5 rounded-xl bg-black/5 dark:bg-white/5 space-y-2">
+                  <div className="flex justify-between items-center gap-2 text-xs font-bold">
+                    <span>{c.name} ({c.selectedUnit})</span>
+                    <input
+                      type="number"
+                      enterKeyHint="done"
+                      onKeyDown={blurOnEnter}
+                      step={stepVal}
+                      value={c.amount}
+                      onChange={(e) => {
+                        const next = [...components];
+                        next[idx].amount = e.target.value;
+                        setComponents(next);
+                      }}
+                      onBlur={() => {
+                        const next = [...components];
+                        const parsed = parseFloat(next[idx].amount);
+                        next[idx].amount = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+                        setComponents(next);
+                      }}
+                      className="w-20 p-1.5 text-right rounded-lg bg-black/10 dark:bg-white/10 text-xs font-bold outline-none"
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={maxVal}
+                    step={stepVal}
+                    value={safeSliderVal}
+                    onChange={(e) => {
+                      const next = [...components];
+                      next[idx].amount = parseFloat(e.target.value);
+                      setComponents(next);
+                    }}
+                    className="w-full accent-emerald-500"
+                  />
+                </div>
+              );
+            })}
+
+            <div className="text-center text-xs opacity-85">
               Nowe wartości: <strong>{computedTotals.calories} kcal</strong> (B: {computedTotals.protein}g, W: {computedTotals.carbs}g, T: {computedTotals.fat}g)
             </div>
 
@@ -1473,7 +1629,7 @@
                 const mult = portionMultiplier / 100;
                 const updatedComponents = components.map(c => ({
                   ...c,
-                  amount: Math.round(c.amount * mult * 10) / 10
+                  amount: Math.round(((parseFloat(c.amount) || 0) * mult) * 10) / 10
                 }));
                 onSave({
                   ...meal,
@@ -1494,13 +1650,21 @@
       );
     }
 
-    // --- PROFIL I USTAWIENIA ---
+    // --- PROFIL I USTAWIENIA (Z obsługą Enter -> zatwierdź i zamknij klawiaturę) ---
     function ProfileView({
       profile, setProfile, targets, apiKey, setApiKey,
       preferredModel, setPreferredModel, theme, setTheme,
-      themeObj, dailyLogs, installPromptEvent, isStandalone, onTriggerInstall
+      fontSize, setFontSize, themeObj, dailyLogs,
+      installPromptEvent, isStandalone, onTriggerInstall
     }) {
       const handleInputChange = (field, val) => setProfile(prev => ({ ...prev, [field]: val }));
+
+      const handleInputBlur = (field) => {
+        setProfile(prev => {
+          const parsed = parseFloat(prev[field]);
+          return { ...prev, [field]: isNaN(parsed) || parsed < 0 ? '0' : String(parsed) };
+        });
+      };
 
       const exportData = () => {
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dailyLogs));
@@ -1516,31 +1680,48 @@
         <div className="space-y-5">
           <div className={`p-4 rounded-3xl border ${themeObj.border} bg-emerald-500/10 grid grid-cols-4 gap-2 text-center`}>
             <div>
-              <p className="text-[10px] uppercase font-bold opacity-60">Kalorie</p>
-              <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">{targets.calories}</p>
+              <p className="text-xs uppercase font-bold opacity-65">Kalorie</p>
+              <p className="text-base font-black text-emerald-600 dark:text-emerald-400">{targets.calories}</p>
             </div>
             <div>
-              <p className="text-[10px] uppercase font-bold opacity-60">Białko</p>
-              <p className="text-sm font-black text-blue-500">{targets.protein}g</p>
+              <p className="text-xs uppercase font-bold opacity-65">Białko</p>
+              <p className="text-base font-black text-blue-500">{targets.protein}g</p>
             </div>
             <div>
-              <p className="text-[10px] uppercase font-bold opacity-60">Węgle</p>
-              <p className="text-sm font-black text-amber-500">{targets.carbs}g</p>
+              <p className="text-xs uppercase font-bold opacity-65">Węgle</p>
+              <p className="text-base font-black text-amber-500">{targets.carbs}g</p>
             </div>
             <div>
-              <p className="text-[10px] uppercase font-bold opacity-60">Tłuszcz</p>
-              <p className="text-sm font-black text-rose-500">{targets.fat}g</p>
+              <p className="text-xs uppercase font-bold opacity-65">Tłuszcz</p>
+              <p className="text-base font-black text-rose-500">{targets.fat}g</p>
             </div>
           </div>
 
+          {/* ROZMIAR CZCIONKI */}
           <div className="space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Motyw aplikacji</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-65 px-1">Wielkość czcionki (Czytelność)</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {FONT_SIZES.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setFontSize(f.id)}
+                  className={`p-3 rounded-2xl border text-xs font-semibold transition-all ${fontSize === f.id ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500 font-bold shadow-sm' : 'border-black/5 dark:border-white/5 opacity-75'}`}
+                >
+                  {f.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* WYBÓR MOTYWU */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-65 px-1">Motyw aplikacji</h3>
             <div className="grid grid-cols-3 gap-2">
               {THEMES.map(t => (
                 <button
                   key={t.id}
                   onClick={() => setTheme(t.id)}
-                  className={`p-2.5 rounded-2xl border text-xs font-semibold flex items-center justify-center space-x-2 ${theme === t.id ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : 'border-black/5 dark:border-white/5 opacity-70'}`}
+                  className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-center space-x-2 ${theme === t.id ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500 font-bold' : 'border-black/5 dark:border-white/5 opacity-75'}`}
                 >
                   <span className={`w-3 h-3 rounded-full ${t.primary}`}></span>
                   <span>{t.name}</span>
@@ -1550,54 +1731,63 @@
           </div>
 
           <div className={`p-4 rounded-2xl border ${themeObj.border} bg-black/5 dark:bg-white/5 space-y-3`}>
-            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60">Zapotrzebowanie</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-65">Zapotrzebowanie</h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[10px] opacity-60 font-semibold">Płeć</label>
+                <label className="text-xs opacity-70 font-semibold">Płeć</label>
                 <select
                   value={profile.gender}
                   onChange={(e) => handleInputChange('gender', e.target.value)}
-                  className="w-full mt-1 p-2 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
+                  className="w-full mt-1 p-2.5 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
                 >
                   <option value="male">Mężczyzna</option>
                   <option value="female">Kobieta</option>
                 </select>
               </div>
               <div>
-                <label className="text-[10px] opacity-60 font-semibold">Wiek</label>
+                <label className="text-xs opacity-70 font-semibold">Wiek</label>
                 <input
                   type="number"
+                  enterKeyHint="done"
+                  onKeyDown={blurOnEnter}
                   value={profile.age}
                   onChange={(e) => handleInputChange('age', e.target.value)}
-                  className="w-full mt-1 p-2 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
+                  onBlur={() => handleInputBlur('age')}
+                  className="w-full mt-1 p-2.5 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
                 />
               </div>
               <div>
-                <label className="text-[10px] opacity-60 font-semibold">Waga (kg)</label>
+                <label className="text-xs opacity-70 font-semibold">Waga (kg)</label>
                 <input
                   type="number"
+                  enterKeyHint="done"
+                  onKeyDown={blurOnEnter}
                   value={profile.weight}
                   onChange={(e) => handleInputChange('weight', e.target.value)}
-                  className="w-full mt-1 p-2 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
+                  onBlur={() => handleInputBlur('weight')}
+                  className="w-full mt-1 p-2.5 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
                 />
               </div>
               <div>
-                <label className="text-[10px] opacity-60 font-semibold">Wzrost (cm)</label>
+                <label className="text-xs opacity-70 font-semibold">Wzrost (cm)</label>
                 <input
                   type="number"
+                  enterKeyHint="done"
+                  onKeyDown={blurOnEnter}
                   value={profile.height}
                   onChange={(e) => handleInputChange('height', e.target.value)}
-                  className="w-full mt-1 p-2 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
+                  onBlur={() => handleInputBlur('height')}
+                  className="w-full mt-1 p-2.5 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-[10px] opacity-60 font-semibold">Cel sylwetkowy</label>
+              <label className="text-xs opacity-70 font-semibold">Cel sylwetkowy</label>
               <select
                 value={profile.goal}
                 onChange={(e) => handleInputChange('goal', e.target.value)}
-                className="w-full mt-1 p-2 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
+                className="w-full mt-1 p-2.5 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
               >
                 <option value="cut">Redukcja tłuszczu (-400 kcal)</option>
                 <option value="maintain">Utrzymanie wagi</option>
@@ -1607,20 +1797,22 @@
           </div>
 
           <div className={`p-4 rounded-2xl border ${themeObj.border} bg-black/5 dark:bg-white/5 space-y-3`}>
-            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60">Klucz Gemini API i Model AI</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-65">Klucz Gemini API i Model AI</h3>
             <input
               type="password"
+              enterKeyHint="done"
+              onKeyDown={blurOnEnter}
               placeholder="AIzaSy..."
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               className="w-full p-2.5 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-mono outline-none"
             />
             <div>
-              <label className="text-[10px] opacity-60 font-semibold">Domyślny model (w razie błędu aplikacja sama przełączy na kolejny)</label>
+              <label className="text-xs opacity-70 font-semibold">Domyślny model (w razie błędu aplikacja sama przełączy na kolejny)</label>
               <select
                 value={preferredModel}
                 onChange={(e) => setPreferredModel(e.target.value)}
-                className="w-full mt-1 p-2 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
+                className="w-full mt-1 p-2.5 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
               >
                 {FALLBACK_MODELS.map(m => (
                   <option key={m} value={m}>{m}</option>
@@ -1631,7 +1823,7 @@
 
           {/* SEKCJA INSTALACJI PWA W PROFILU */}
           <div className={`p-4 rounded-2xl border ${themeObj.border} bg-black/5 dark:bg-white/5 space-y-2`}>
-            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60">Instalacja na telefonie (PWA)</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-65">Instalacja na telefonie (PWA)</h3>
             {isStandalone ? (
               <p className="text-xs text-emerald-500 font-semibold">
                 ✓ Aplikacja jest już zainstalowana i działa w trybie pełnoekranowym.
@@ -1645,7 +1837,7 @@
                 <span>Zainstaluj aplikację na telefonie</span>
               </button>
             ) : (
-              <p className="text-[11px] opacity-70 leading-relaxed">
+              <p className="text-xs opacity-70 leading-relaxed">
                 Jeśli aplikacja jest już zainstalowana na Twoim telefonie, przycisk instalacji jest ukryty przez system. W przeciwnym razie otwórz menu przeglądarki (⋮) i wybierz <strong>„Zainstaluj aplikację”</strong>.
               </p>
             )}
@@ -1653,7 +1845,7 @@
 
           <button
             onClick={exportData}
-            className="w-full py-3 rounded-2xl border border-black/10 dark:border-white/10 text-xs font-bold opacity-80 hover:opacity-100"
+            className="w-full py-3.5 rounded-2xl border border-black/10 dark:border-white/10 text-xs font-bold opacity-80 hover:opacity-100"
           >
             Eksportuj historię (JSON)
           </button>
