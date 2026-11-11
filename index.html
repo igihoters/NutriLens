@@ -3,10 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  
+  <!-- Tagi pełnoekranowe PWA dla Android (Chrome) oraz iOS (Safari) -->
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="NutriAI" />
-  <title>AI Nutrition & Calorie Tracker</title>
+  <meta name="theme-color" content="#10b981" />
+  <title>NutriAI - Licznik Kalorii</title>
+
+  <!-- Powiązanie z plikiem manifest.json (dla pełnej instalacji PWA na Androidzie) -->
+  <link rel="manifest" href="manifest.json" id="manifest-link" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2310b981'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='55'>🥗</text></svg>" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2310b981'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='55'>🥗</text></svg>" />
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -38,7 +47,7 @@
       -webkit-tap-highlight-color: transparent;
       user-select: none;
     }
-    input, textarea {
+    input, textarea, select {
       user-select: auto;
     }
   </style>
@@ -46,8 +55,48 @@
 <body class="bg-gray-50 text-gray-900 transition-colors duration-200">
   <div id="root"></div>
 
+  <!-- Automatyczna rejestracja Service Workera i zapasowego Manifestu PWA -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+    // Jeśli użytkownik nie dodał jeszcze pliku manifest.json, wstrzyknij manifest dynamicznie
+    fetch('manifest.json').then(r => {
+      if (!r.ok) throw new Error();
+    }).catch(() => {
+      const dynamicManifest = {
+        name: "NutriAI - Licznik Kalorii",
+        short_name: "NutriAI",
+        start_url: window.location.href,
+        display: "standalone",
+        background_color: "#18181b",
+        theme_color: "#10b981",
+        icons: [{
+          src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='42' fill='%2310b981'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='100'>🥗</text></svg>",
+          sizes: "192x192",
+          type: "image/svg+xml",
+          purpose: "any maskable"
+        }]
+      };
+      const blob = new Blob([JSON.stringify(dynamicManifest)], { type: 'application/json' });
+      document.getElementById('manifest-link').setAttribute('href', URL.createObjectURL(blob));
+    });
+  </script>
+
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
+
+    // --- LISTA MODELI Z AUTOMATYCZNYM FALLBACKIEM ---
+    const FALLBACK_MODELS = [
+      'gemini-3.8-flash',
+      'gemini-3.8-flash-lite',
+      'gemini-3-flash',
+      'gemini-2.5-flash-lite',
+      'argon',
+      'gemini-2.5-flash'
+    ];
 
     // --- IKONY SVG ---
     const Icon = ({ name, className = "w-5 h-5", filled = false }) => {
@@ -59,10 +108,13 @@
         pencil: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />,
         chevronLeft: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />,
         chevronRight: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />,
+        chevronDown: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />,
         camera: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9zM15 13a3 3 0 11-6 0 3 3 0 016 0z" />,
+        image: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />,
         type: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h7" />,
         barcode: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v16m4-16v16m4-16v16m4-16v16m4-16v16" />,
         heart: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />,
+        refresh: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />,
         x: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
       };
 
@@ -98,12 +150,13 @@
 
     // --- GŁÓWNY KOMPONENT ---
     function App() {
-      const [theme, setTheme] = useState(() => localStorage.getItem('nutri_theme') || 'light');
+      const [theme, setTheme] = useState(() => localStorage.getItem('nutri_theme') || 'dark');
       const [profile, setProfile] = useState(() => {
         try { return JSON.parse(localStorage.getItem('nutri_profile')) || DEFAULT_PROFILE; }
         catch(e) { return DEFAULT_PROFILE; }
       });
       const [apiKey, setApiKey] = useState(() => localStorage.getItem('nutri_gemini_api_key') || '');
+      const [preferredModel, setPreferredModel] = useState(() => localStorage.getItem('nutri_preferred_model') || 'gemini-3.8-flash');
       const [dailyLogs, setDailyLogs] = useState(() => {
         try { return JSON.parse(localStorage.getItem('nutri_daily_logs')) || {}; }
         catch(e) { return {}; }
@@ -116,12 +169,24 @@
       const [activeTab, setActiveTab] = useState('dashboard');
       const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
       const [editingMeal, setEditingMeal] = useState(null);
+      const [installPromptEvent, setInstallPromptEvent] = useState(null);
 
       useEffect(() => localStorage.setItem('nutri_theme', theme), [theme]);
       useEffect(() => localStorage.setItem('nutri_profile', JSON.stringify(profile)), [profile]);
       useEffect(() => localStorage.setItem('nutri_gemini_api_key', apiKey), [apiKey]);
+      useEffect(() => localStorage.setItem('nutri_preferred_model', preferredModel), [preferredModel]);
       useEffect(() => localStorage.setItem('nutri_daily_logs', JSON.stringify(dailyLogs)), [dailyLogs]);
       useEffect(() => localStorage.setItem('nutri_favorites', JSON.stringify(favorites)), [favorites]);
+
+      // Przechwycenie natywnego monitu instalacji PWA na Androidzie
+      useEffect(() => {
+        const handler = (e) => {
+          e.preventDefault();
+          setInstallPromptEvent(e);
+        };
+        window.addEventListener('beforeinstallprompt', handler);
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+      }, []);
 
       const currentThemeObj = THEMES.find(t => t.id === theme) || THEMES[0];
 
@@ -184,9 +249,22 @@
               <span className={`w-3 h-3 rounded-full ${currentThemeObj.primary}`}></span>
               <h1 className="text-lg font-bold tracking-tight">NutriAI</h1>
             </div>
-            <span className="text-xs font-medium px-2 py-1 rounded bg-black/5 dark:bg-white/10 opacity-70">
-              {currentThemeObj.name}
-            </span>
+            <div className="flex items-center space-x-2">
+              {installPromptEvent && (
+                <button
+                  onClick={() => {
+                    installPromptEvent.prompt();
+                    installPromptEvent.userChoice.then(() => setInstallPromptEvent(null));
+                  }}
+                  className="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500 text-white shadow"
+                >
+                  Zainstaluj aplikację
+                </button>
+              )}
+              <span className="text-xs font-medium px-2 py-1 rounded bg-black/5 dark:bg-white/10 opacity-70">
+                {currentThemeObj.name}
+              </span>
+            </div>
           </header>
 
           <main className="max-w-md mx-auto px-4 pt-4">
@@ -207,6 +285,7 @@
               <AddMealWizard
                 selectedDate={selectedDate}
                 apiKey={apiKey}
+                preferredModel={preferredModel}
                 theme={currentThemeObj}
                 favorites={favorites}
                 onOpenProfile={() => setActiveTab('profile')}
@@ -230,6 +309,8 @@
                 targets={calculatedTargets}
                 apiKey={apiKey}
                 setApiKey={setApiKey}
+                preferredModel={preferredModel}
+                setPreferredModel={setPreferredModel}
                 theme={theme}
                 setTheme={setTheme}
                 themeObj={currentThemeObj}
@@ -282,6 +363,9 @@
 
     // --- DASHBOARD ---
     function DashboardView({ selectedDate, setSelectedDate, totals, targets, meals, onDeleteMeal, onEditMeal, theme }) {
+      const [mealFilter, setMealFilter] = useState('Wszystkie');
+      const [showMicros, setShowMicros] = useState(false);
+
       const changeDay = (offset) => {
         const d = new Date(selectedDate);
         d.setDate(d.getDate() + offset);
@@ -291,11 +375,34 @@
       const isToday = selectedDate === new Date().toISOString().split('T')[0];
       const isDaySkipped = meals.length === 0;
 
+      const filteredMeals = useMemo(() => {
+        if (mealFilter === 'Wszystkie') return meals;
+        return meals.filter(m => (m.mealType || 'Śniadanie') === mealFilter);
+      }, [meals, mealFilter]);
+
+      const filteredTotals = useMemo(() => {
+        return filteredMeals.reduce((acc, meal) => {
+          acc.calories += meal.totalCalories || 0;
+          acc.protein += meal.totalProtein || 0;
+          acc.carbs += meal.totalCarbs || 0;
+          acc.fat += meal.totalFat || 0;
+          return acc;
+        }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
+      }, [filteredMeals]);
+
       const macroBars = [
-        { label: 'Kalorie', val: totals.calories, target: targets.calories, unit: 'kcal', color: 'bg-emerald-500' },
-        { label: 'Białko', val: totals.protein, target: targets.protein, unit: 'g', color: 'bg-blue-500' },
-        { label: 'Węgle', val: totals.carbs, target: targets.carbs, unit: 'g', color: 'bg-amber-500' },
-        { label: 'Tłuszcze', val: totals.fat, target: targets.fat, unit: 'g', color: 'bg-rose-500' },
+        { label: 'Kalorie', val: filteredTotals.calories, target: targets.calories, unit: 'kcal', color: 'bg-emerald-500' },
+        { label: 'Białko', val: filteredTotals.protein, target: targets.protein, unit: 'g', color: 'bg-blue-500' },
+        { label: 'Węgle', val: filteredTotals.carbs, target: targets.carbs, unit: 'g', color: 'bg-amber-500' },
+        { label: 'Tłuszcze', val: filteredTotals.fat, target: targets.fat, unit: 'g', color: 'bg-rose-500' },
+      ];
+
+      // Orientacyjne mikroskładniki wyliczane proporcjonalnie
+      const microBars = [
+        { label: 'Błonnik', pct: Math.min(100, Math.round((filteredTotals.carbs / 150) * 80)) },
+        { label: 'Witamina C', pct: Math.min(100, Math.round((filteredTotals.calories / 2000) * 75)) },
+        { label: 'Żelazo', pct: Math.min(100, Math.round((filteredTotals.protein / 120) * 85)) },
+        { label: 'Magnez', pct: Math.min(100, Math.round((filteredTotals.calories / 2000) * 70)) },
       ];
 
       return (
@@ -313,12 +420,26 @@
             </button>
           </div>
 
+          {/* FILTR POSIŁKÓW */}
+          <div className="flex space-x-1.5 overflow-x-auto pb-1">
+            {['Wszystkie', 'Śniadanie', 'Obiad', 'Kolacja', 'Przekąska'].map(cat => (
+              <button
+                key={cat}
+                onClick={() => setMealFilter(cat)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${mealFilter === cat ? 'bg-emerald-500 text-white shadow-sm' : 'bg-black/5 dark:bg-white/5 opacity-70'}`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
           {isDaySkipped && (
             <div className="p-2.5 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-center text-xs font-medium">
               Dzień ominięty (brak wpisów – nie zaniża średniej)
             </div>
           )}
 
+          {/* GŁÓWNE WYKRESY SŁUPKOWE */}
           <div className={`p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-3.5`}>
             {macroBars.map((m, idx) => {
               const pct = m.target > 0 ? Math.min(100, Math.round((m.val / m.target) * 100)) : 0;
@@ -336,17 +457,48 @@
                 </div>
               );
             })}
+
+            {/* ROZWIJANA SEKCJA WITAMIN I MIKROSKŁADNIKÓW */}
+            <div className="pt-2 border-t border-black/5 dark:border-white/5">
+              <button
+                onClick={() => setShowMicros(!showMicros)}
+                className="w-full flex items-center justify-between text-xs font-semibold opacity-75 hover:opacity-100 py-1"
+              >
+                <span>Witaminy i pozostałe składniki (orientacyjnie)</span>
+                <Icon name="chevronDown" className={`w-4 h-4 transition-transform ${showMicros ? 'rotate-180' : ''}`} />
+              </button>
+              {showMicros && (
+                <div className="space-y-2.5 pt-3">
+                  {microBars.map((micro, idx) => (
+                    <div key={idx} className="space-y-1">
+                      <div className="flex justify-between text-[11px] opacity-80">
+                        <span>{micro.label}</span>
+                        <span>~{micro.pct}% dziennego celu</span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
+                        <div className="h-full bg-teal-500 rounded-full transition-all duration-500" style={{ width: `${micro.pct}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2.5 pt-2">
-            <h2 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Zjedzone posiłki ({meals.length})</h2>
-            {meals.length === 0 ? (
-              <p className="text-center py-8 text-sm opacity-50 italic">Brak posiłków na ten dzień.</p>
+            <h2 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Zjedzone posiłki ({filteredMeals.length})</h2>
+            {filteredMeals.length === 0 ? (
+              <p className="text-center py-8 text-sm opacity-50 italic">Brak posiłków w tym widoku.</p>
             ) : (
-              meals.map((meal) => (
+              filteredMeals.map((meal) => (
                 <div key={meal.id} className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 flex items-center justify-between`}>
                   <div className="space-y-0.5">
-                    <h3 className="text-sm font-bold">{meal.name}</h3>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-500">
+                        {meal.mealType || 'Posiłek'}
+                      </span>
+                      <h3 className="text-sm font-bold">{meal.name}</h3>
+                    </div>
                     <p className="text-xs opacity-60">{meal.components?.map(c => c.name).join(', ') || 'Posiłek'}</p>
                     <p className="text-xs font-medium text-emerald-500">
                       {meal.totalCalories} kcal &bull; B: {meal.totalProtein}g &bull; W: {meal.totalCarbs}g &bull; T: {meal.totalFat}g
@@ -368,37 +520,50 @@
       );
     }
 
-    // --- KREATOR DODAWANIA Z PRAWDZIWYM GEMINI API ---
-    function AddMealWizard({ selectedDate, apiKey, theme, favorites, onMealAdded, onOpenProfile }) {
-      const [step, setStep] = useState(0); // 0: Wybór, 1: Co rozpoznano, 2: Ustal porcje
+    // --- KREATOR DODAWANIA Z AUTOMATYCZNYM FALLBACKIEM MODELI ---
+    function AddMealWizard({ selectedDate, apiKey, preferredModel, theme, favorites, onMealAdded, onOpenProfile }) {
+      const [step, setStep] = useState(0);
+      const [mealType, setMealType] = useState('Śniadanie');
       const [mealName, setMealName] = useState('');
       const [components, setComponents] = useState([]);
       const [previewImg, setPreviewImg] = useState(null);
+      const [lastBase64, setLastBase64] = useState(null);
+      const [lastMimeType, setLastMimeType] = useState(null);
       const [isFavorite, setIsFavorite] = useState(false);
       const [isLoading, setIsLoading] = useState(false);
       const [loadingStatus, setLoadingStatus] = useState('');
+      const [usedModelName, setUsedModelName] = useState('');
 
       const resetWizard = () => {
         setStep(0);
         setMealName('');
         setComponents([]);
         setPreviewImg(null);
+        setLastBase64(null);
+        setLastMimeType(null);
         setIsFavorite(false);
         setIsLoading(false);
+        setUsedModelName('');
       };
 
-      // WYWOŁANIE GEMINI API
-      const callGeminiVision = async (base64Data, mimeType, isLabelScan) => {
+      // FUNKCJA Z AUTOMATYCZNYM PRZEŁĄCZANIEM MODELI (FALLBACK)
+      const callGeminiWithFallback = async ({ base64Data, mimeType, textPrompt, mode }) => {
         if (!apiKey) {
           const proceed = confirm("Brak klucza Gemini API w Profilu. Czy chcesz przejść do Profilu i go wkleić?");
           if (proceed) onOpenProfile();
           return null;
         }
 
-        const promptText = isLabelScan
+        // Ustawienie kolejności modeli (najpierw wybrany przez użytkownika, potem reszta z listy)
+        const modelQueue = [
+          preferredModel,
+          ...FALLBACK_MODELS.filter(m => m !== preferredModel)
+        ];
+
+        const systemInstruction = mode === 'label'
           ? `Jesteś precyzyjnym dietetykiem. Przeanalizuj zdjęcie etykiety produktu lub tabeli wartości odżywczych.
-             Odczytaj nazwę produktu, wartości odżywcze na 100g oraz typowe jednostki porcji.
-             Zwróć WYŁĄCZNIE poprawny JSON (bez markdown) w formacie:
+             Odczytaj nazwę produktu, wartości odżywcze na 100g oraz typowe jednostki porcji i ich wagi w gramach.
+             Zwróć WYŁĄCZNIE poprawny JSON w formacie:
              {
                "dishName": "Nazwa produktu z etykiety",
                "components": [
@@ -408,8 +573,8 @@
                    "amount": 1,
                    "selectedUnit": "porcja",
                    "isHeaped": false,
-                   "allowedUnits": ["g", "sztuka", "porcja", "garść"],
-                   "unitWeights": { "g": 1, "sztuka": 50, "porcja": 30, "garść": 25 },
+                   "allowedUnits": ["g", "porcja", "sztuka", "garść"],
+                   "unitWeights": { "g": 1, "porcja": 30, "sztuka": 50, "garść": 25 },
                    "caloriesPer100g": 450,
                    "proteinPer100g": 7,
                    "carbsPer100g": 60,
@@ -417,19 +582,20 @@
                  }
                ]
              }`
-          : `Jesteś precyzyjnym dietetykiem. Przeanalizuj zdjęcie posiłku. Zidentyfikuj widoczne składniki i prawdopodobny sposób przyrządzenia.
-             Zwróć WYŁĄCZNIE poprawny JSON (bez markdown) w formacie:
+          : `Jesteś precyzyjnym dietetykiem. Przeanalizuj posiłek (ze zdjęcia lub opisu: "${textPrompt || 'zdjęcie'}").
+             Rozbij go na poszczególne składniki, określ sposób przyrządzenia, wartości odżywcze na 100g oraz realistyczne jednostki miary i ich dokładną wagę w gramach dla tego konkretnego składnika (np. 1 sztuka ziemniaka = 80g, 1 garść ziemniaków = 120g).
+             Zwróć WYŁĄCZNIE poprawny JSON w formacie:
              {
                "dishName": "Krótka nazwa dania",
                "components": [
                  {
                    "name": "Nazwa składnika",
-                   "prepMethod": "np. smażony na oleju / pieczony",
+                   "prepMethod": "np. smażony na oleju / pieczony / gotowany",
                    "amount": 1,
                    "selectedUnit": "sztuka",
                    "isHeaped": false,
                    "allowedUnits": ["sztuka", "garść", "g", "łyżka"],
-                   "unitWeights": { "sztuka": 150, "garść": 50, "g": 1, "łyżka": 15 },
+                   "unitWeights": { "sztuka": 150, "garść": 60, "g": 1, "łyżka": 15 },
                    "caloriesPer100g": 150,
                    "proteinPer100g": 20,
                    "carbsPer100g": 5,
@@ -438,110 +604,109 @@
                ]
              }`;
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: promptText },
-                { inlineData: { mimeType: mimeType, data: base64Data } }
-              ]
-            }],
-            generationConfig: {
-              responseMimeType: "application/json"
-            }
-          })
-        });
-
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error?.message || "Błąd zapytania do Gemini API");
+        const parts = [{ text: systemInstruction }];
+        if (base64Data) {
+          parts.push({ inlineData: { mimeType: mimeType || 'image/jpeg', data: base64Data } });
         }
 
-        const resData = await response.json();
-        const rawJsonText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-        return JSON.parse(rawJsonText);
+        let lastError = null;
+
+        for (let i = 0; i < modelQueue.length; i++) {
+          const modelName = modelQueue[i];
+          setLoadingStatus(
+            i === 0
+              ? `Analiza przez model ${modelName}...`
+              : `Model niedostępny. Próbuję zapasowy model: ${modelName}...`
+          );
+
+          try {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts }],
+                generationConfig: {
+                  responseMimeType: "application/json"
+                }
+              })
+            });
+
+            if (!response.ok) {
+              const errData = await response.json().catch(() => ({}));
+              throw new Error(errData.error?.message || `HTTP ${response.status}`);
+            }
+
+            const resData = await response.json();
+            const rawJsonText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!rawJsonText) throw new Error("Pusta odpowiedź modelu");
+
+            const parsed = JSON.parse(rawJsonText);
+            setUsedModelName(modelName);
+            return parsed;
+          } catch (err) {
+            console.warn(`Błąd na modelu ${modelName}:`, err.message);
+            lastError = err;
+            // Kontynuuj pętlę do następnego modelu
+          }
+        }
+
+        throw new Error(`Wszystkie modele zawiodły. Ostatni błąd: ${lastError?.message}`);
       };
 
-      // OBSŁUGA WYBORU PLIKU (Natywna przez <label>)
+      // OBSŁUGA ZDJĘCIA Z APARATU LUB GALERII
       const handleFileSelected = async (e, mode) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         setIsLoading(true);
-        setLoadingStatus(mode === 'label' ? 'Odczytywanie tabeli z etykiety...' : 'Rozpoznawanie składników posiłku...');
-
         try {
           const { base64, mimeType, previewUrl } = await fileToBase64(file);
           setPreviewImg(previewUrl);
+          setLastBase64(base64);
+          setLastMimeType(mimeType);
 
-          // Jeśli klucz API jest podany – odpytaj prawdziwy model
           if (apiKey) {
-            const result = await callGeminiVision(base64, mimeType, mode === 'label');
+            const result = await callGeminiWithFallback({ base64Data: base64, mimeType, mode });
             if (result) {
               setMealName(result.dishName || (mode === 'label' ? 'Produkt z etykiety' : 'Posiłek'));
               setComponents(result.components || []);
               setStep(mode === 'label' ? 2 : 1);
             }
           } else {
-            // Rezerwowa symulacja z zachowaniem wgranego zdjęcia
-            setTimeout(() => {
-              if (mode === 'label') {
-                setMealName('Przekąska z etykiety');
-                setComponents([{
-                  name: 'Produkt z etykiety',
-                  prepMethod: 'gotowy ze sklepu',
-                  amount: 1,
-                  selectedUnit: 'porcja',
-                  isHeaped: false,
-                  allowedUnits: ['g', 'porcja', 'sztuka', 'garść'],
-                  unitWeights: { 'g': 1, 'porcja': 30, 'sztuka': 60, 'garść': 25 },
-                  caloriesPer100g: 520,
-                  proteinPer100g: 6,
-                  carbsPer100g: 58,
-                  fatPer100g: 29
-                }]);
-                setStep(2);
-              } else {
-                setMealName('Danie ze zdjęcia');
-                setComponents([
-                  {
-                    name: 'Pierś z kurczaka',
-                    prepMethod: 'pieczona bez tłuszczu',
-                    amount: 1,
-                    selectedUnit: 'sztuka',
-                    isHeaped: false,
-                    allowedUnits: ['sztuka', 'garść', 'g'],
-                    unitWeights: { 'sztuka': 160, 'garść': 60, 'g': 1 },
-                    caloriesPer100g: 145,
-                    proteinPer100g: 31,
-                    carbsPer100g: 0,
-                    fatPer100g: 2.5
-                  },
-                  {
-                    name: 'Ziemniaki z koperkiem',
-                    prepMethod: 'gotowane w wodzie',
-                    amount: 2,
-                    selectedUnit: 'sztuka',
-                    isHeaped: false,
-                    allowedUnits: ['sztuka', 'garść', 'g'],
-                    unitWeights: { 'sztuka': 80, 'garść': 120, 'g': 1 },
-                    caloriesPer100g: 77,
-                    proteinPer100g: 2,
-                    carbsPer100g: 17,
-                    fatPer100g: 0.1
-                  }
-                ]);
-                setStep(1);
-              }
-            }, 800);
+            alert("Wpisz swój klucz Gemini API w zakładce Profil, aby analizować prawdziwe zdjęcia.");
           }
         } catch(err) {
           alert("Błąd podczas analizy: " + err.message);
         } finally {
           setIsLoading(false);
-          e.target.value = ''; // Reset inputa
+          e.target.value = '';
+        }
+      };
+
+      // PONOWNE PRZELICZENIE PRZEZ AI PO EDYCJI SKŁADNIKÓW W KROKU 1
+      const handleRecalculateStep1 = async () => {
+        if (!apiKey) {
+          setStep(2);
+          return;
+        }
+        setIsLoading(true);
+        try {
+          const summaryDesc = components.map(c => `${c.name} (${c.prepMethod || 'standardowo'})`).join(', ');
+          const result = await callGeminiWithFallback({
+            base64Data: lastBase64,
+            mimeType: lastMimeType,
+            textPrompt: `Użytkownik skorygował listę składników na: ${summaryDesc}. Przelicz wartości odżywcze na 100g i wagi jednostek dokładnie dla tej poprawionej listy.`,
+            mode: 'meal'
+          });
+          if (result && result.components) {
+            setComponents(result.components);
+          }
+          setStep(2);
+        } catch (err) {
+          alert("Nie udało się przeliczyć ponownie: " + err.message);
+          setStep(2);
+        } finally {
+          setIsLoading(false);
         }
       };
 
@@ -553,15 +718,16 @@
 
       const totals = useMemo(() => {
         return components.reduce((acc, c) => {
-          let weightInGrams = (c.unitWeights[c.selectedUnit] || 1) * c.amount;
+          const unitWeights = c.unitWeights || { 'g': 1, 'sztuka': 100 };
+          let weightInGrams = (unitWeights[c.selectedUnit] || 1) * c.amount;
           if (c.isHeaped && (c.selectedUnit === 'łyżka' || c.selectedUnit === 'łyżeczka')) {
             weightInGrams *= 1.6;
           }
           const ratio = weightInGrams / 100;
-          acc.calories += Math.round(c.caloriesPer100g * ratio);
-          acc.protein += Math.round(c.proteinPer100g * ratio);
-          acc.carbs += Math.round(c.carbsPer100g * ratio);
-          acc.fat += Math.round(c.fatPer100g * ratio);
+          acc.calories += Math.round((c.caloriesPer100g || 0) * ratio);
+          acc.protein += Math.round((c.proteinPer100g || 0) * ratio);
+          acc.carbs += Math.round((c.carbsPer100g || 0) * ratio);
+          acc.fat += Math.round((c.fatPer100g || 0) * ratio);
           return acc;
         }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
       }, [components]);
@@ -569,6 +735,7 @@
       const handleSave = () => {
         const newMeal = {
           id: 'meal-' + Date.now(),
+          mealType,
           name: mealName || 'Posiłek',
           components,
           totalCalories: totals.calories,
@@ -589,20 +756,38 @@
                 <Icon name="chevronLeft" className="w-5 h-5" />
               </button>
             ) : <div className="w-9" />}
-            <h2 className="text-sm font-bold">
-              {step === 0 && "Dodaj posiłek"}
-              {step === 1 && "Krok 1: Weryfikacja składników"}
-              {step === 2 && "Krok 2: Ustal porcje"}
-            </h2>
+            <div className="text-center">
+              <h2 className="text-sm font-bold">
+                {step === 0 && "Dodaj posiłek"}
+                {step === 1 && "Krok 1: Co rozpoznano?"}
+                {step === 2 && "Krok 2: Ustal porcje"}
+              </h2>
+              {usedModelName && step > 0 && (
+                <p className="text-[10px] text-emerald-500 font-medium">Model: {usedModelName}</p>
+              )}
+            </div>
             {step > 0 ? (
               <button onClick={resetWizard} className="p-2 -mr-2 rounded-xl text-xs opacity-60 hover:opacity-100">Anuluj</button>
             ) : <div className="w-9" />}
           </div>
 
+          {/* WYBÓR PORY POSIŁKU */}
+          <div className="grid grid-cols-4 gap-1.5">
+            {['Śniadanie', 'Obiad', 'Kolacja', 'Przekąska'].map(cat => (
+              <button
+                key={cat}
+                onClick={() => setMealType(cat)}
+                className={`py-2 rounded-xl text-xs font-semibold transition-all ${mealType === cat ? 'bg-emerald-500 text-white shadow-sm' : 'bg-black/5 dark:bg-white/5 opacity-70'}`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
           {isLoading && (
             <div className="text-center py-16 space-y-3">
               <div className="inline-block w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-xs font-medium opacity-80">{loadingStatus}</p>
+              <p className="text-xs font-medium opacity-80 px-4">{loadingStatus}</p>
             </div>
           )}
 
@@ -610,76 +795,113 @@
             <div className="space-y-3">
               {!apiKey && (
                 <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs flex justify-between items-center">
-                  <span>Działa w trybie demonstracyjnym.</span>
-                  <button onClick={onOpenProfile} className="underline font-bold ml-2">Wpisz klucz API</button>
+                  <span>Wklej klucz Gemini API w Profilu, aby uruchomić analizę AI.</span>
+                  <button onClick={onOpenProfile} className="underline font-bold ml-2">Profil</button>
                 </div>
               )}
 
-              {/* 1. ZDJĘCIE POSIŁKU (Natywny <label> - 100% działa w przeglądarce) */}
-              <label className={`cursor-pointer w-full p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 flex items-center space-x-3 active:scale-98 transition-transform block`}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => handleFileSelected(e, 'meal')}
-                />
-                <div className="p-3 rounded-xl bg-emerald-500 text-white"><Icon name="camera" /></div>
-                <div className="text-left">
-                  <p className="text-sm font-bold">Zrób lub wczytaj zdjęcie posiłku</p>
-                  <p className="text-xs opacity-60">AI rozpozna danie i dopyta o składniki</p>
-                </div>
-              </label>
+              {/* SEKCJA 1: POSIŁEK ZE ZDJĘCIA (Osobno Aparat i Galeria) */}
+              <div className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2.5`}>
+                <p className="text-xs font-bold uppercase tracking-wider opacity-60">1. Analiza talerza / posiłku</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {/* BEZPOŚREDNI APARAT (capture="environment") */}
+                  <label className="cursor-pointer p-3 rounded-xl bg-emerald-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleFileSelected(e, 'meal')}
+                    />
+                    <Icon name="camera" className="w-6 h-6" />
+                    <span className="text-xs font-bold">Zrób zdjęcie</span>
+                    <span className="text-[10px] opacity-80">Otwórz Aparat</span>
+                  </label>
 
-              {/* 2. ZDJĘCIE ETYKIETY (Również natywny aparat/plik) */}
-              <label className={`cursor-pointer w-full p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 flex items-center space-x-3 active:scale-98 transition-transform block`}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => handleFileSelected(e, 'label')}
-                />
-                <div className="p-3 rounded-xl bg-amber-500 text-white"><Icon name="barcode" /></div>
-                <div className="text-left">
-                  <p className="text-sm font-bold">Zrób zdjęcie etykiety</p>
-                  <p className="text-xs opacity-60">AI odczyta tabelę wartości i ustawi porcję</p>
+                  {/* WCZYTAJ Z GALERII (Bez capture) */}
+                  <label className={`cursor-pointer p-3 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center space-y-1.5 active:scale-95 transition-transform`}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => handleFileSelected(e, 'meal')}
+                    />
+                    <Icon name="image" className="w-6 h-6 text-emerald-500" />
+                    <span className="text-xs font-bold">Z galerii</span>
+                    <span className="text-[10px] opacity-60">Wybierz plik</span>
+                  </label>
                 </div>
-              </label>
+              </div>
 
-              {/* 3. WPISZ TEKSTOWO */}
+              {/* SEKCJA 2: SKANOWANIE ETYKIETY (Osobno Aparat i Galeria) */}
+              <div className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2.5`}>
+                <p className="text-xs font-bold uppercase tracking-wider opacity-60">2. Skanuj tabelę / etykietę (Kcal na 100g)</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {/* BEZPOŚREDNI APARAT DLA ETYKIETY */}
+                  <label className="cursor-pointer p-3 rounded-xl bg-amber-500 text-white flex flex-col items-center justify-center space-y-1.5 shadow active:scale-95 transition-transform">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleFileSelected(e, 'label')}
+                    />
+                    <Icon name="barcode" className="w-6 h-6" />
+                    <span className="text-xs font-bold">Skanuj aparatem</span>
+                    <span className="text-[10px] opacity-80">Zdjęcie tabeli</span>
+                  </label>
+
+                  {/* ETYKIETA Z GALERII */}
+                  <label className={`cursor-pointer p-3 rounded-xl border ${theme.border} bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center space-y-1.5 active:scale-95 transition-transform`}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => handleFileSelected(e, 'label')}
+                    />
+                    <Icon name="image" className="w-6 h-6 text-amber-500" />
+                    <span className="text-xs font-bold">Etykieta z galerii</span>
+                    <span className="text-[10px] opacity-60">Wybierz plik</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* SEKCJA 3: WPISZ TEKSTOWO (Również analizowane przez AI z fallbackiem) */}
               <button
-                onClick={() => {
-                  const text = prompt("Opisz posiłek (np. 2 jajka sadzone i kromka chleba):");
-                  if (text) {
-                    setMealName(text);
-                    setComponents([{
-                      name: text,
-                      prepMethod: 'domowy',
-                      amount: 1,
-                      selectedUnit: 'porcja',
-                      isHeaped: false,
-                      allowedUnits: ['porcja', 'g'],
-                      unitWeights: { 'porcja': 200, 'g': 1 },
-                      caloriesPer100g: 130,
-                      proteinPer100g: 9,
-                      carbsPer100g: 10,
-                      fatPer100g: 6
-                    }]);
-                    setStep(1);
+                onClick={async () => {
+                  const text = prompt("Opisz co zjadłeś (np. 2 jajka sadzone na maśle i kromka chleba żytniego):");
+                  if (!text) return;
+                  if (!apiKey) {
+                    alert("Wklej klucz Gemini API w zakładce Profil.");
+                    return;
+                  }
+                  setIsLoading(true);
+                  try {
+                    const result = await callGeminiWithFallback({ textPrompt: text, mode: 'meal' });
+                    if (result) {
+                      setMealName(result.dishName || text);
+                      setComponents(result.components || []);
+                      setStep(1);
+                    }
+                  } catch (err) {
+                    alert("Błąd analizy tekstu: " + err.message);
+                  } finally {
+                    setIsLoading(false);
                   }
                 }}
                 className={`w-full p-4 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 flex items-center space-x-3 active:scale-98 transition-transform`}
               >
                 <div className="p-3 rounded-xl bg-blue-500 text-white"><Icon name="type" /></div>
                 <div className="text-left">
-                  <p className="text-sm font-bold">Wpisz tekstowo</p>
-                  <p className="text-xs opacity-60">Gdy zjadłeś posiłek i nie masz zdjęcia</p>
+                  <p className="text-sm font-bold">Wpisz tekstowo (AI)</p>
+                  <p className="text-xs opacity-60">Opisz posiłek słowami, gdy nie masz zdjęcia</p>
                 </div>
               </button>
 
               {/* ULUBIONE */}
               {favorites.length > 0 && (
-                <div className="pt-3 space-y-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Ulubione</h3>
+                <div className="pt-2 space-y-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Z ulubionych (szybkie dodanie)</h3>
                   {favorites.map(fav => (
                     <button
                       key={fav.id}
@@ -695,16 +917,16 @@
             </div>
           )}
 
-          {/* KROK 1: CO ROZPOZNANO */}
+          {/* KROK 1: WERYFIKACJA SKŁADNIKÓW I OBRÓBKI */}
           {!isLoading && step === 1 && (
             <div className="space-y-3">
               {previewImg && (
-                <div className="w-full h-36 rounded-2xl overflow-hidden border border-black/10 dark:border-white/10 mb-2">
-                  <img src={previewImg} alt="Podgląd zdjęcia" className="w-full h-full object-cover" />
+                <div className="w-full h-36 rounded-2xl overflow-hidden border border-black/10 dark:border-white/10">
+                  <img src={previewImg} alt="Podgląd" className="w-full h-full object-cover" />
                 </div>
               )}
 
-              <p className="text-xs opacity-70">Sprawdź składniki przed ustaleniem gramatury:</p>
+              <p className="text-xs opacity-70">Sprawdź rozpoznane składniki i sposób przyrządzenia (możesz dopisać np. rodzaj mięsa lub smażenie na maśle):</p>
 
               {components.map((c, i) => (
                 <div key={i} className={`p-3 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-2`}>
@@ -725,7 +947,7 @@
                   </div>
                   <input
                     type="text"
-                    placeholder="Sposób przygotowania"
+                    placeholder="Sposób przygotowania (np. wieprzowina, smażone na łyżce oleju)"
                     value={c.prepMethod || ''}
                     onChange={(e) => {
                       const next = [...components];
@@ -740,111 +962,150 @@
               <button
                 onClick={() => {
                   setComponents([...components, {
-                    name: 'Nowy składnik',
+                    name: 'Dodatkowy składnik',
                     prepMethod: '',
                     amount: 1,
                     selectedUnit: 'sztuka',
                     isHeaped: false,
-                    unitWeights: { 'sztuka': 100, 'g': 1 },
-                    allowedUnits: ['sztuka', 'g'],
-                    caloriesPer100g: 100,
+                    unitWeights: { 'sztuka': 100, 'garść': 50, 'łyżka': 15, 'g': 1 },
+                    allowedUnits: ['sztuka', 'garść', 'łyżka', 'g'],
+                    caloriesPer100g: 120,
                     proteinPer100g: 5,
-                    carbsPer100g: 10,
-                    fatPer100g: 2
+                    carbsPer100g: 15,
+                    fatPer100g: 4
                   }]);
                 }}
                 className="w-full py-2.5 rounded-xl border border-dashed border-emerald-500/50 text-emerald-500 text-xs font-bold"
               >
-                + Dodaj kolejny składnik
+                + Dodaj brakujący składnik
               </button>
 
-              <button
-                onClick={() => setStep(2)}
-                className="w-full py-3.5 rounded-2xl bg-emerald-500 text-white font-bold text-sm shadow-md active:scale-98"
-              >
-                Dalej: Ustal porcje
-              </button>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  onClick={handleRecalculateStep1}
+                  className="py-3 px-2 rounded-2xl border border-emerald-500 text-emerald-500 font-bold text-xs flex items-center justify-center space-x-1 active:scale-95"
+                >
+                  <Icon name="refresh" className="w-4 h-4" />
+                  <span>Przelicz zmiany z AI</span>
+                </button>
+                <button
+                  onClick={() => setStep(2)}
+                  className="py-3 px-2 rounded-2xl bg-emerald-500 text-white font-bold text-xs shadow-md active:scale-95"
+                >
+                  Dalej: Ustal ilości
+                </button>
+              </div>
             </div>
           )}
 
-          {/* KROK 2: USTALANIE PORCJI */}
+          {/* KROK 2: USTALANIE PORCJI DLA KAŻDEGO SKŁADNIKA */}
           {!isLoading && step === 2 && (
             <div className="space-y-4">
-              {previewImg && (
-                <div className="w-full h-28 rounded-2xl overflow-hidden border border-black/10 dark:border-white/10">
-                  <img src={previewImg} alt="Podgląd zdjęcia" className="w-full h-full object-cover" />
-                </div>
-              )}
-
               <div className={`p-3.5 rounded-2xl border ${theme.border} bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-center`}>
                 <p className="text-xl font-black">{totals.calories} kcal</p>
                 <p className="text-xs font-semibold mt-0.5">
-                  B: {totals.protein}g &bull; W: {totals.carbs}g &bull; T: {totals.fat}g
+                  Białko: {totals.protein}g &bull; Węgle: {totals.carbs}g &bull; Tłuszcze: {totals.fat}g
                 </p>
               </div>
 
-              {components.map((c, i) => (
-                <div key={i} className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-3`}>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-bold">{c.name}</span>
-                    <span className="text-xs font-semibold opacity-70">
-                      {c.amount} {c.selectedUnit} {c.isHeaped ? '(czubata)' : ''}
-                    </span>
-                  </div>
+              {components.map((c, i) => {
+                const allowedUnits = c.allowedUnits || ['sztuka', 'garść', 'g'];
+                const unitWeights = c.unitWeights || { 'sztuka': 100, 'garść': 50, 'g': 1 };
+                const maxVal = c.selectedUnit === 'g' ? 500 : 5;
+                const stepVal = c.selectedUnit === 'g' ? 10 : 0.5;
+                const ticks = c.selectedUnit === 'g'
+                  ? [50, 100, 200, 300, 400, 500]
+                  : [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {c.allowedUnits.map(unit => {
-                      const approxGram = (c.unitWeights[unit] || 0) * (c.isHeaped && (unit === 'łyżka' || unit === 'łyżeczka') ? 1.6 : 1);
-                      const isSel = c.selectedUnit === unit;
-                      return (
-                        <button
-                          key={unit}
-                          onClick={() => {
-                            const next = [...components];
-                            next[i].selectedUnit = unit;
-                            setComponents(next);
-                          }}
-                          className={`py-1.5 px-2 rounded-xl text-xs flex flex-col items-center justify-center border ${isSel ? 'border-emerald-500 bg-emerald-500/10 font-bold text-emerald-500' : 'border-black/5 dark:border-white/5 opacity-70'}`}
-                        >
-                          <span>{unit}</span>
-                          {unit !== 'g' && <span className="text-[10px] opacity-60">~{Math.round(approxGram)}g</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {(c.selectedUnit === 'łyżka' || c.selectedUnit === 'łyżeczka') && (
-                    <label className="flex items-center space-x-2 text-xs font-medium cursor-pointer pt-1">
+                return (
+                  <div key={i} className={`p-3.5 rounded-2xl border ${theme.border} bg-black/5 dark:bg-white/5 space-y-3`}>
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="text-sm font-bold block">{c.name}</span>
+                        {c.prepMethod && <span className="text-[10px] opacity-60">{c.prepMethod}</span>}
+                      </div>
                       <input
-                        type="checkbox"
-                        checked={c.isHeaped}
+                        type="number"
+                        step={stepVal}
+                        value={c.amount}
                         onChange={(e) => {
                           const next = [...components];
-                          next[i].isHeaped = e.target.checked;
+                          next[i].amount = parseFloat(e.target.value) || 0;
                           setComponents(next);
                         }}
-                        className="rounded text-emerald-500"
+                        className="w-20 p-1.5 text-right rounded-lg bg-black/10 dark:bg-white/10 text-xs font-bold outline-none"
                       />
-                      <span>Czubata łyżka (+60% wagi)</span>
-                    </label>
-                  )}
+                    </div>
 
-                  <input
-                    type="range"
-                    min={c.selectedUnit === 'g' ? 10 : 0.5}
-                    max={c.selectedUnit === 'g' ? 500 : 8}
-                    step={c.selectedUnit === 'g' ? 10 : 0.5}
-                    value={c.amount}
-                    onChange={(e) => {
-                      const next = [...components];
-                      next[i].amount = parseFloat(e.target.value);
-                      setComponents(next);
-                    }}
-                    className="w-full accent-emerald-500 cursor-pointer"
-                  />
-                </div>
-              ))}
+                    {/* KAFELKI JEDNOSTEK Z PRZYBLIŻONĄ WAGĄ W GRAMACH */}
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {allowedUnits.map(unit => {
+                        const approxGram = (unitWeights[unit] || 1) * (c.isHeaped && (unit === 'łyżka' || unit === 'łyżeczka') ? 1.6 : 1);
+                        const isSel = c.selectedUnit === unit;
+                        return (
+                          <button
+                            key={unit}
+                            onClick={() => {
+                              const next = [...components];
+                              next[i].selectedUnit = unit;
+                              next[i].amount = unit === 'g' ? 100 : 1;
+                              setComponents(next);
+                            }}
+                            className={`py-1.5 px-2 rounded-xl text-xs flex flex-col items-center justify-center border ${isSel ? 'border-emerald-500 bg-emerald-500/10 font-bold text-emerald-500' : 'border-black/5 dark:border-white/5 opacity-70'}`}
+                          >
+                            <span>{unit}</span>
+                            {unit !== 'g' && <span className="text-[10px] opacity-60">1 = ~{Math.round(approxGram)}g</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
 
+                    {(c.selectedUnit === 'łyżka' || c.selectedUnit === 'łyżeczka') && (
+                      <label className="flex items-center space-x-2 text-xs font-medium cursor-pointer pt-1">
+                        <input
+                          type="checkbox"
+                          checked={c.isHeaped}
+                          onChange={(e) => {
+                            const next = [...components];
+                            next[i].isHeaped = e.target.checked;
+                            setComponents(next);
+                          }}
+                          className="rounded text-emerald-500"
+                        />
+                        <span>Czubata łyżka (+60% wagi)</span>
+                      </label>
+                    )}
+
+                    {/* SUWAK Z WIZUALNYMI KROPKAMI */}
+                    <div className="space-y-1">
+                      <input
+                        type="range"
+                        min={c.selectedUnit === 'g' ? 10 : 0.5}
+                        max={maxVal}
+                        step={stepVal}
+                        value={Math.min(maxVal, c.amount)}
+                        list={`ticks-${i}`}
+                        onChange={(e) => {
+                          const next = [...components];
+                          next[i].amount = parseFloat(e.target.value);
+                          setComponents(next);
+                        }}
+                        className="w-full accent-emerald-500 cursor-pointer"
+                      />
+                      <datalist id={`ticks-${i}`}>
+                        {ticks.map(t => <option key={t} value={t} />)}
+                      </datalist>
+                      <div className="flex justify-between text-[10px] opacity-40 px-1">
+                        <span>{c.selectedUnit === 'g' ? '10g' : '0.5'}</span>
+                        <span>{c.selectedUnit === 'g' ? '250g' : '2.5'}</span>
+                        <span>{c.selectedUnit === 'g' ? '500g' : '5'}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* SERDUSZKO ULUBIONYCH */}
               <div className="flex items-center justify-between px-2 pt-1">
                 <button
                   type="button"
@@ -856,7 +1117,7 @@
                     className={`w-5 h-5 transition-colors ${isFavorite ? 'text-rose-500 fill-rose-500' : 'opacity-40'}`}
                     filled={isFavorite}
                   />
-                  <span>{isFavorite ? "Zapisano w Ulubionych" : "Zapisz do Ulubionych"}</span>
+                  <span>{isFavorite ? "Zapisano w Ulubionych" : "Dodaj do Ulubionych"}</span>
                 </button>
               </div>
 
@@ -872,25 +1133,41 @@
       );
     }
 
-    // --- MODAL EDYCJI ---
+    // --- MODAL EDYCJI WPISANEGO POSIŁKU ---
     function EditMealModal({ meal, theme, onClose, onSave }) {
       const [mealName, setMealName] = useState(meal.name);
       const [portionMultiplier, setPortionMultiplier] = useState(100);
+      const [components, setComponents] = useState(() => JSON.parse(JSON.stringify(meal.components || [])));
       const [isFavorite, setIsFavorite] = useState(false);
 
       const computedTotals = useMemo(() => {
-        const ratio = portionMultiplier / 100;
-        return {
-          calories: Math.round(meal.totalCalories * ratio),
-          protein: Math.round(meal.totalProtein * ratio),
-          carbs: Math.round(meal.totalCarbs * ratio),
-          fat: Math.round(meal.totalFat * ratio),
-        };
-      }, [meal, portionMultiplier]);
+        const mult = portionMultiplier / 100;
+        if (!components.length) {
+          return {
+            calories: Math.round(meal.totalCalories * mult),
+            protein: Math.round(meal.totalProtein * mult),
+            carbs: Math.round(meal.totalCarbs * mult),
+            fat: Math.round(meal.totalFat * mult),
+          };
+        }
+        return components.reduce((acc, c) => {
+          const unitWeights = c.unitWeights || { 'g': 1, 'sztuka': 100 };
+          let weightInGrams = (unitWeights[c.selectedUnit] || 1) * c.amount * mult;
+          if (c.isHeaped && (c.selectedUnit === 'łyżka' || c.selectedUnit === 'łyżeczka')) {
+            weightInGrams *= 1.6;
+          }
+          const ratio = weightInGrams / 100;
+          acc.calories += Math.round((c.caloriesPer100g || 0) * ratio);
+          acc.protein += Math.round((c.proteinPer100g || 0) * ratio);
+          acc.carbs += Math.round((c.carbsPer100g || 0) * ratio);
+          acc.fat += Math.round((c.fatPer100g || 0) * ratio);
+          return acc;
+        }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
+      }, [components, meal, portionMultiplier]);
 
       return (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full max-w-sm rounded-3xl p-5 border ${theme.border} ${theme.bg} ${theme.text} space-y-4 shadow-2xl`}>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className={`w-full max-w-sm max-h-[90vh] overflow-y-auto rounded-3xl p-5 border ${theme.border} ${theme.bg} ${theme.text} space-y-4 shadow-2xl`}>
             <div className="flex justify-between items-center">
               <h3 className="text-base font-bold">Edytuj posiłek</h3>
               <button onClick={onClose} className="p-1 opacity-50 hover:opacity-100"><Icon name="x" className="w-5 h-5" /></button>
@@ -903,24 +1180,48 @@
               className="w-full p-2.5 rounded-xl border border-black/10 dark:border-white/10 bg-transparent text-sm font-semibold outline-none"
             />
 
+            {/* GLOBALNY SUWAK DRUGIEJ PORCJI (%) */}
             <div className="space-y-1.5 p-3 rounded-2xl bg-black/5 dark:bg-white/5">
               <div className="flex justify-between text-xs font-semibold">
-                <span>Wielkość porcji:</span>
+                <span>Skalowanie całej porcji:</span>
                 <span className="text-emerald-500 font-bold">{portionMultiplier}%</span>
               </div>
               <input
                 type="range"
                 min="25"
                 max="250"
-                step="5"
+                step="25"
                 value={portionMultiplier}
                 onChange={(e) => setPortionMultiplier(parseInt(e.target.value))}
                 className="w-full accent-emerald-500 cursor-pointer"
               />
             </div>
 
-            <div className="text-center text-xs opacity-70">
-              Nowe wartości: <strong>{computedTotals.calories} kcal</strong>
+            {/* EDYCJA POSZCZEGÓLNYCH SKŁADNIKÓW */}
+            {components.map((c, idx) => (
+              <div key={idx} className="p-3 rounded-xl bg-black/5 dark:bg-white/5 space-y-2">
+                <div className="flex justify-between text-xs font-bold">
+                  <span>{c.name}</span>
+                  <span>{c.amount} {c.selectedUnit}</span>
+                </div>
+                <input
+                  type="range"
+                  min={c.selectedUnit === 'g' ? 10 : 0.5}
+                  max={c.selectedUnit === 'g' ? 500 : 5}
+                  step={c.selectedUnit === 'g' ? 10 : 0.5}
+                  value={c.amount}
+                  onChange={(e) => {
+                    const next = [...components];
+                    next[idx].amount = parseFloat(e.target.value);
+                    setComponents(next);
+                  }}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+            ))}
+
+            <div className="text-center text-xs opacity-80">
+              Nowe wartości: <strong>{computedTotals.calories} kcal</strong> (B: {computedTotals.protein}g, W: {computedTotals.carbs}g, T: {computedTotals.fat}g)
             </div>
 
             <div className="flex items-center space-x-2 pt-1">
@@ -936,9 +1237,15 @@
 
             <button
               onClick={() => {
+                const mult = portionMultiplier / 100;
+                const updatedComponents = components.map(c => ({
+                  ...c,
+                  amount: Math.round(c.amount * mult * 10) / 10
+                }));
                 onSave({
                   ...meal,
                   name: mealName,
+                  components: updatedComponents,
                   totalCalories: computedTotals.calories,
                   totalProtein: computedTotals.protein,
                   totalCarbs: computedTotals.carbs,
@@ -955,7 +1262,7 @@
     }
 
     // --- PROFIL I USTAWIENIA ---
-    function ProfileView({ profile, setProfile, targets, apiKey, setApiKey, theme, setTheme, themeObj, dailyLogs }) {
+    function ProfileView({ profile, setProfile, targets, apiKey, setApiKey, preferredModel, setPreferredModel, theme, setTheme, themeObj, dailyLogs }) {
       const handleInputChange = (field, val) => setProfile(prev => ({ ...prev, [field]: val }));
 
       const exportData = () => {
@@ -990,7 +1297,7 @@
           </div>
 
           <div className="space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Motyw</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 px-1">Motyw aplikacji</h3>
             <div className="grid grid-cols-3 gap-2">
               {THEMES.map(t => (
                 <button
@@ -1062,9 +1369,9 @@
             </div>
           </div>
 
-          <div className={`p-4 rounded-2xl border ${themeObj.border} bg-black/5 dark:bg-white/5 space-y-2`}>
-            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60">Klucz Gemini API</h3>
-            <p className="text-[11px] opacity-60">Wpisz darmowy klucz z Google AI Studio, aby aplikacja odpytywała prawdziwy model Gemini.</p>
+          {/* KLUCZ API ORAZ WYBÓR MODELU Z FALLBACKIEM */}
+          <div className={`p-4 rounded-2xl border ${themeObj.border} bg-black/5 dark:bg-white/5 space-y-3`}>
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60">Klucz Gemini API i Model AI</h3>
             <input
               type="password"
               placeholder="AIzaSy..."
@@ -1072,6 +1379,18 @@
               onChange={(e) => setApiKey(e.target.value)}
               className="w-full p-2.5 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-mono outline-none"
             />
+            <div>
+              <label className="text-[10px] opacity-60 font-semibold">Domyślny model (w razie błędu aplikacja sama przełączy na kolejny)</label>
+              <select
+                value={preferredModel}
+                onChange={(e) => setPreferredModel(e.target.value)}
+                className="w-full mt-1 p-2 rounded-xl bg-black/5 dark:bg-white/10 text-xs font-semibold outline-none"
+              >
+                {FALLBACK_MODELS.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <button
